@@ -1,0 +1,19 @@
+{
+  "run_id": "r_wallet_mock",
+  "summary": {
+    "run_id": "r_wallet_mock", "scenario": "wallet", "n": 2, "delay_ms": 0, "trials": 50,
+    "trials_with_violation": 46, "races_observed": 46,
+    "per_invariant": { "wallet.balance_conservation": 46, "wallet.total_withdrawn_within_initial": 46 },
+    "invariants_used": ["wallet.balance_conservation", "wallet.total_withdrawn_within_initial"], "human_approved": true
+  },
+  "first_failing_trial": {
+    "run_id": "r_wallet_mock", "scenario": "wallet", "n": 2, "delay_ms": 0, "trial": 0,
+    "initial_state": { "balance": 100 },
+    "requests": [
+      { "req": 0, "method": "POST", "path": "/withdraw", "params": { "amount": 80 }, "status": 200, "start_ms": 0.0, "end_ms": 38.4 },
+      { "req": 1, "method": "POST", "path": "/withdraw", "params": { "amount": 80 }, "status": 200, "start_ms": 0.3, "end_ms": 37.9 }
+    ],
+    "final_state": { "balance": 20 },
+    "violations": { "wallet.balance_conservation": [[100, 20, 160]], "wallet.total_withdrawn_within_initial": [[1]] }
+  }
+}

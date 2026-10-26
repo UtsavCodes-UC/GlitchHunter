@@ -1,0 +1,37 @@
+{
+  "invariants": [
+    {
+      "id": "wallet.balance_conservation", "name": "balance_conservation",
+      "english": "Money at the start equals money left plus the money successful withdrawals took.",
+      "sql": "SELECT 1 FROM initial_state i, wallet w WHERE i.balance <> w.balance + COALESCE((SELECT SUM(amount) FROM ops_log WHERE endpoint = '/withdraw' AND status = 200), 0)",
+      "source": "llm", "status": "proposed",
+      "stats": { "sequential_trials": 10, "sequential_fires": 0, "concurrent_trials": 50, "concurrent_fires": 46, "races_observed": 46, "recall_on_race": 1.0 },
+      "note": "passes the filter; needs human approval"
+    },
+    {
+      "id": "wallet.total_withdrawn_within_initial", "name": "total_withdrawn_within_initial",
+      "english": "Successful withdrawals never add up to more than the starting balance.",
+      "sql": "SELECT 1 FROM initial_state i WHERE i.balance < COALESCE((SELECT SUM(amount) FROM ops_log WHERE endpoint = '/withdraw' AND status = 200), 0)",
+      "source": "llm", "status": "approved",
+      "stats": { "sequential_trials": 10, "sequential_fires": 0, "concurrent_trials": 50, "concurrent_fires": 46, "races_observed": 46, "recall_on_race": 1.0 },
+      "note": "passes the filter; needs human approval"
+    },
+    {
+      "id": "wallet.no_negative_balance", "name": "no_negative_balance",
+      "english": "The balance is never below zero.",
+      "sql": "SELECT 1 FROM wallet WHERE balance < 0",
+      "source": "llm", "status": "uninformative",
+      "stats": { "sequential_trials": 10, "sequential_fires": 0, "concurrent_trials": 50, "concurrent_fires": 0, "races_observed": 46, "recall_on_race": 0.0 },
+      "note": "never fires under concurrency, cannot detect this bug"
+    },
+    {
+      "id": "wallet.no_rejected_requests", "name": "no_rejected_requests",
+      "english": "DECOY: no request is ever rejected (too strict).",
+      "sql": "select op_id from ops_log where status <> 200",
+      "source": "manual", "status": "dropped",
+      "stats": { "sequential_trials": 10, "sequential_fires": 10, "concurrent_trials": 50, "concurrent_fires": 4, "races_observed": 46, "recall_on_race": 0.0 },
+      "note": "fires on one-at-a-time runs, so the rule itself is wrong"
+    }
+  ],
+  "stats": { "provider": "mock", "model": "mock", "samples": 3, "proposed": 4, "valid_sql": 4, "unique_valid": 4, "parse_failures": 0 }
+}

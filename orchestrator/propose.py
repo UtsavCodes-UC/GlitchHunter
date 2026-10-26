@@ -27,8 +27,10 @@ def propose(cfg, sc, samples=3):
         attacker.prepare(cl, admin, sc)  # make sure tables, ops_log and initial_state exist so the schema text is complete
         prompt = TEMPLATE.read_text(encoding="utf-8").replace("{APP}", context.app_text(cfg, sc))
         out, seen, total, valid, parse_fail = [], set(), 0, 0, 0
+        llm_errors = []
         for k in range(samples):
-            invs = parse(llm.complete(prompt))
+            try: invs = parse(llm.complete(prompt))
+            except Exception as e: llm_errors.append(repr(e)[:160]); continue  # one failed sample must not lose the others
             if invs is None: parse_fail += 1; continue
             for inv in invs:
                 sql = inv.get("sql", ""); ok, err = validate_sql(ro, sql); total += 1; valid += ok
@@ -40,5 +42,6 @@ def propose(cfg, sc, samples=3):
                 out.append({"id": iid, "name": slug, "english": inv.get("english", ""), "sql": sql.strip().rstrip(";"),
                             "source": "llm", "status": "proposed", "stats": {}})
     finally: cl.close(); admin.close(); ro.close()
+    if llm_errors and not out and total == 0: raise RuntimeError(f"the LLM did not answer any of {samples} samples: {llm_errors[0]}")
     return out, {"provider": llm.PROVIDER, "model": llm.LAST_MODEL, "samples": samples, "proposed": total, "valid_sql": valid,
-                 "unique_valid": len(out), "parse_failures": parse_fail}
+                 "unique_valid": len(out), "parse_failures": parse_fail, "llm_errors": len(llm_errors)}

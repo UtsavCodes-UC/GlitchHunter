@@ -26,13 +26,17 @@ def complete(prompt, max_tokens=900):
         global LAST_MODEL
         for m in [MODEL] + [x for x in FALLBACK_MODELS if x != MODEL]:
             for attempt in range(2):
-                r = httpx.post(f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent", timeout=120,
-                               headers={"x-goog-api-key": key},
-                               json={"contents": [{"parts": [{"text": prompt}]}],
-                                     "generationConfig": {"maxOutputTokens": max(max_tokens, 16384), "responseMimeType": "application/json"}})
+                try:  # a slow or hung response must not stall the whole request: cut it at 60 s and move on
+                    r = httpx.post(f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent", timeout=60,
+                                   headers={"x-goog-api-key": key},
+                                   json={"contents": [{"parts": [{"text": prompt}]}],
+                                         "generationConfig": {"maxOutputTokens": max(max_tokens, 16384), "responseMimeType": "application/json"}})
+                except httpx.TimeoutException:
+                    r = None; break  # no retry on the same model after a timeout
                 if r.status_code not in (429, 503): break
                 time.sleep(3 * (attempt + 1))
-            if r.status_code not in (429, 503): break
+            if r is not None and r.status_code not in (429, 503): break
+        if r is None: raise RuntimeError("every Gemini model timed out")
         r.raise_for_status(); LAST_MODEL = m
         return "".join(p.get("text", "") for p in r.json()["candidates"][0]["content"]["parts"])
     if PROVIDER == "ollama":

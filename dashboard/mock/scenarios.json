@@ -1,0 +1,4 @@
+[
+  { "id": "wallet", "endpoint": { "method": "POST", "path": "/withdraw", "params": { "amount": 80 } }, "invariants": 5 },
+  { "id": "inventory", "endpoint": { "method": "POST", "path": "/checkout", "params": { "qty": 1 } }, "invariants": 0 }
+]
