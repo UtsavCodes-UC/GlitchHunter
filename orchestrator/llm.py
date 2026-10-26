@@ -2,9 +2,12 @@
 Keys come only from the environment (ANTHROPIC_API_KEY, GEMINI_API_KEY); nothing is printed or stored."""
 import os, time, httpx
 
-PROVIDER = os.environ.get("LLM_PROVIDER", "anthropic")
+PROVIDER = os.environ.get("LLM_PROVIDER", "gemini")
 MODEL = os.environ.get("LLM_MODEL", {"anthropic": "claude-sonnet-5-5", "gemini": "gemini-3.5-flash",
                                      "ollama": "llama3.1:latest"}.get(PROVIDER, ""))
+
+FALLBACK_MODELS = [m for m in os.environ.get("LLM_FALLBACK_MODELS", "gemini-3-flash-preview,gemini-3.5-flash-lite").split(",") if m]
+LAST_MODEL = MODEL  # the model that answered the most recent call (differs from MODEL after a fallback)
 
 def complete(prompt, max_tokens=900):
     if PROVIDER == "anthropic":
@@ -18,14 +21,19 @@ def complete(prompt, max_tokens=900):
     if PROVIDER == "gemini":
         key = os.environ.get("GEMINI_API_KEY")
         if not key: raise RuntimeError("GEMINI_API_KEY is not set in this terminal")
-        for attempt in range(4):  # 429/503 are transient overload; thinking tokens share the output budget, so allow more
-            r = httpx.post(f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent", timeout=120,
-                           headers={"x-goog-api-key": key},
-                           json={"contents": [{"parts": [{"text": prompt}]}],
-                                 "generationConfig": {"maxOutputTokens": max(max_tokens, 4096), "responseMimeType": "application/json"}})
+        # 429 (free-tier quota, per model) / 503 (overload) are transient: retry briefly, then fall back to the next model.
+        # Thinking tokens share the output budget, so allow more. LAST_MODEL records which model actually answered.
+        global LAST_MODEL
+        for m in [MODEL] + [x for x in FALLBACK_MODELS if x != MODEL]:
+            for attempt in range(2):
+                r = httpx.post(f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent", timeout=120,
+                               headers={"x-goog-api-key": key},
+                               json={"contents": [{"parts": [{"text": prompt}]}],
+                                     "generationConfig": {"maxOutputTokens": max(max_tokens, 16384), "responseMimeType": "application/json"}})
+                if r.status_code not in (429, 503): break
+                time.sleep(3 * (attempt + 1))
             if r.status_code not in (429, 503): break
-            time.sleep(2 ** attempt * 2)
-        r.raise_for_status()
+        r.raise_for_status(); LAST_MODEL = m
         return "".join(p.get("text", "") for p in r.json()["candidates"][0]["content"]["parts"])
     if PROVIDER == "ollama":
         r = httpx.post("http://localhost:11434/api/generate", timeout=240,

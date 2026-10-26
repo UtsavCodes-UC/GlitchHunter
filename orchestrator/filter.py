@@ -1,49 +1,30 @@
-"""Sequential filter for candidate invariants (wallet). Needs the vulnerable app running on :8000.
-usage: python invariant_filter.py [S_SEQ=10] [K_CONC=50]
-1. sequential workload (requests one at a time, no concurrency): a candidate that fires is WRONG -> DROPPED
-2. concurrent workload (barrier burst): a candidate that never fires is UNINFORMATIVE
-3. survivors are KEEP = proposed for human approval; recall is measured against a race oracle (evaluation only)"""
-import sys, json, httpx, psycopg2
-import controller as c
+"""Filter step. Run every candidate on (1) a one-at-a-time workload and (2) a simultaneous workload.
+fires sequentially -> dropped (the rule itself is wrong); never fires under concurrency -> uninformative;
+the rest stay `proposed` for human approval, with recall measured against a race oracle (evaluation only; PASS bar 0.9)."""
+from controller import attacker
 
-CANDIDATES = {**c.INVARIANTS,  # two correct ones plus deliberately over-strict ones, as an LLM might propose
-    "no_rejected_requests": "select op_id from ops_log where status <> 200",
-    "balance_unchanged": "select balance from wallet where balance <> (select balance from initial_state)",
-    "single_withdrawal": "select 1 from ops_log where endpoint='/withdraw' and status=200 having count(*) <> 1",
-}
-
-def sequential_trial(cl, conn, n):
-    cl.post("/reset", params={"balance": 100, "stock": 5})
-    for _ in range(n):
-        cl.post("/withdraw", params={"amount": c.AMOUNT})
-    return c.check(conn, CANDIDATES)
-
-if __name__ == "__main__":
-    S = int(sys.argv[1]) if len(sys.argv) > 1 else 10; K = int(sys.argv[2]) if len(sys.argv) > 2 else 50
-    if len(sys.argv) > 3:  # optional: add the valid LLM-proposed invariants from a propose_invariants.py output file
-        for inv in json.load(open(sys.argv[3]))["invariants"]:
-            if inv.get("valid_sql"): CANDIDATES[f"llm{inv['sample']}_{inv['name']}"[:40]] = inv["sql"]
-    conn = psycopg2.connect(c.DSN); 
-    conn.set_session(readonly=True, autocommit=True)
-    conn.cursor().execute("set statement_timeout = 5000")
-    cl = httpx.Client(base_url=c.BASE, timeout=30, limits=httpx.Limits(max_connections=100))
-    seq_fires = {k: 0 for k in CANDIDATES}
-    for _ in range(S):
-        for k, rows in sequential_trial(cl, conn, 2).items(): seq_fires[k] += bool(rows)
-    conc_fires = {k: 0 for k in CANDIDATES}; hit_on_race = {k: 0 for k in CANDIDATES}; races = 0
-    for _ in range(K):
-        cl.post("/reset", params={"balance": 100, "stock": 5})
-        reqs = c.burst(cl, 2, 0)
-        race = sum(r["status"] == 200 for r in reqs) * c.AMOUNT > 100  # oracle: more money out than existed
-        races += race
-        for k, rows in c.check(conn, CANDIDATES).items():
-            conc_fires[k] += bool(rows); hit_on_race[k] += bool(rows) and race
-    print(f"sequential trials={S}, concurrent trials={K}, trials where the race really happened={races}")
-    print(f"{'invariant':22s} seq_fires conc_fires recall_on_race  verdict")
-    for k in CANDIDATES:
-        recall = hit_on_race[k] / races if races else 0
-        if seq_fires[k]: verdict = "DROPPED (fires sequentially)"
-        elif conc_fires[k] == 0: verdict = "UNINFORMATIVE (never fires under concurrency)"
-        elif recall >= 0.9: verdict = "KEEP -> human approval"
-        else: verdict = f"WEAK (recall {recall:.0%} < 90%)"
-        print(f"{k:22s} {seq_fires[k]:>4}/{S:<4} {conc_fires[k]:>4}/{K:<5} {hit_on_race[k]:>3}/{races:<3} {recall:>6.0%}  {verdict}")
+def run_filter(cfg, sc, invs, sequential_trials=10, trials=50, delay=0):
+    cand = {i["id"]: i["sql"] for i in invs if i["status"] in ("proposed", "uninformative", "dropped")}
+    admin, ro, cl = attacker.connect(cfg), attacker.connect(cfg, True), attacker.client(sc["base_url"])
+    seq = {k: 0 for k in cand}; conc = {k: 0 for k in cand}; hit = {k: 0 for k in cand}; races = 0
+    try:
+        for _ in range(sequential_trials):
+            t = attacker.trial(cl, admin, ro, sc, cand, sc["race_n"], 0, sequential=True)
+            for k in attacker.fired(t["violations"]): seq[k] += 1
+        for _ in range(trials):
+            t = attacker.trial(cl, admin, ro, sc, cand, sc["race_n"], delay); race = attacker.race_happened(sc, t); races += race
+            for k in attacker.fired(t["violations"]): conc[k] += 1; hit[k] += race
+    finally: cl.close(); admin.close(); ro.close()
+    for i in invs:
+        k = i["id"]
+        if k not in cand: continue
+        recall = round(hit[k] / races, 3) if races else None
+        i["stats"] = {"sequential_trials": sequential_trials, "sequential_fires": seq[k], "concurrent_trials": trials,
+                      "concurrent_fires": conc[k], "races_observed": races, "recall_on_race": recall}
+        if seq[k]: i["status"], i["note"] = "dropped", "fires on one-at-a-time runs, so the rule itself is wrong"
+        elif not conc[k]: i["status"], i["note"] = "uninformative", "never fires under concurrency, cannot detect this bug"
+        else:
+            i["status"] = "proposed"
+            i["note"] = ("passes the filter; needs human approval" if recall is not None and recall >= 0.9
+                         else "fires under concurrency but recall is below 0.9 or no race was observed; review carefully")
+    return invs

@@ -1,10 +1,39 @@
-# Example target config. Copy to gh.yml for real use. No secrets here: the database URL comes from an environment variable.
-base_url: http://127.0.0.1:8000
-database_url_env: GH_DATABASE_URL   # e.g. postgresql://rh:rh@localhost:5432/rh (set in your environment)
-start_command: python -m uvicorn wallet_app:app --port 8000
-reset: POST /reset
-endpoints:
-  - method: POST
-    path: /withdraw
-    params: { amount: 80 }
-# auth_headers: { Authorization: "Bearer <token from environment>" }
+# Target config. gh.yml (if present) is used instead of this file; GH_CONFIG can point anywhere.
+# No secrets here: the database URL comes from the environment variable named below.
+database_url_env: GH_DATABASE_URL   # e.g. postgresql://rh:rh@localhost:5432/rh
+
+scenarios:
+  wallet:
+    base_url: http://127.0.0.1:8000        # app started by hand: $env:MODE="vuln"; python -m uvicorn wallet_app:app --port 8000 (inside apps/)
+    candidate_port: 8101                   # port used for the COPY of the app that runs a candidate fix
+    app_file: apps/wallet_app.py           # endpoint function runs from its decorator to a "# END-ENDPOINT" line
+    endpoint: {method: POST, path: /withdraw, params: {amount: 80}}
+    reset: {path: /reset, params: {balance: 100, stock: 5}}
+    state_path: /state
+    tables: [wallet]                       # app tables shown to the LLM (schema is read from the live database)
+    initial_columns: [balance]             # which initial_state columns apply (the others are NULL)
+    race_n: 2                              # simultaneous requests per trial
+    conservation: {table: wallet, col: balance, initial: balance, qty: amount}
+    oracle: {param: amount, initial: balance}   # evaluation only: more taken out than existed = a real race happened
+    regression:
+      - {reset: {balance: 100}, calls: [{params: {amount: 80}, status: 200}, {params: {amount: 80}, status: 409}], state: {balance: 20}}
+      - {reset: {balance: 100}, calls: [{params: {amount: 100}, status: 200}], state: {balance: 0}}
+      - {reset: {balance: 100}, calls: [{params: {amount: 101}, status: 409}], state: {balance: 100}}
+    throughput: {reset: {balance: 1000000}, params: {amount: 1}}
+
+  inventory:
+    base_url: http://127.0.0.1:8001        # matches apps/README.md (inventory runs on 8001)
+    candidate_port: 8102
+    app_file: apps/inventory_app.py
+    endpoint: {method: POST, path: /checkout, params: {qty: 1}}
+    reset: {path: /reset, params: {balance: 100, stock: 1}}
+    state_path: /state
+    tables: [inventory]
+    initial_columns: [stock]
+    race_n: 2
+    conservation: {table: inventory, col: stock, initial: stock, qty: qty}
+    oracle: {param: qty, initial: stock}
+    regression:
+      - {reset: {stock: 3}, calls: [{params: {qty: 1}, status: 200}, {params: {qty: 1}, status: 200}], state: {stock: 1}}
+      - {reset: {stock: 1}, calls: [{params: {qty: 1}, status: 200}, {params: {qty: 1}, status: 409}], state: {stock: 0}}
+    throughput: {reset: {stock: 1000000}, params: {qty: 1}}

@@ -17,8 +17,11 @@ Owners: apps = Person 2, dashboard = Person 3, orchestrator + controller = Utsav
 - Optional test-only header `X-Race-Delay: <ms>` pauses between the check and the write (buggy mode only).
 - One file per scenario; mode flag `MODE=vuln|fixed` read from the environment; port from the command line.
 
-## Config (`gh.yml`, see `gh.example.yml`)
-`base_url`, `database_url_env` (name of an environment variable), `start_command`, `reset`, `endpoints[{method, path, params}]`, optional `auth_headers`.
+## Config (`gh.yml`, falls back to `gh.example.yml`; see that file for every field)
+Top level: `database_url_env` (NAME of the environment variable holding the Postgres URL, e.g. `GH_DATABASE_URL`) and `scenarios:` (wallet, inventory). Each scenario has `base_url`, `candidate_port`, `app_file`, `endpoint{method,path,params}`, `reset{path,params}`, `state_path`, `tables`, `initial_columns`, `race_n`, `conservation`, `oracle`, `regression`, `throughput`.
+
+## App file convention (needed by the repair tool)
+Each endpoint function starts at its `@app.post("/path")` decorator and ends at a line `# END-ENDPOINT` directly after it. Both `MODE == "vuln"` and `MODE == "fixed"` branches live inside that one function (the repair tool shows the LLM only the vulnerable branch). Module-level names that patches rely on: `app`, `Conn`, `hook`, `Header`, `HTTPException`.
 
 ## Invariant
 ```json
@@ -53,5 +56,10 @@ A failing schedule is a trial result that has at least one violation plus enough
 - `POST /scenarios/{id}/filter` → `{"invariants": [Invariant]}` (with `stats` and `status`)
 - `POST /scenarios/{id}/attack` body `{"n": 2, "trials": 50, "delay_ms": 0}` → `{"run_id": "...", "summary": {...}}`
 - `POST /scenarios/{id}/repair` → `{"attempts": [RepairAttempt], "accepted": bool}`
-- `GET /runs/{run_id}` → trial results
+- `GET /runs/{run_id}` → `{"summary": {...}, "failing_trials": [Trial result]}`
+- `GET /scenarios` → `[{"id", "endpoint", "invariants": <count>}]`; `GET /scenarios/{id}/invariants` → `{"invariants": [Invariant]}`
+- `PATCH /scenarios/{id}/invariants/{invariant_id}` body `{"status": "approved"|"rejected"|"proposed"}` → the updated Invariant (a human decision is never overwritten by a later propose)
+- `POST .../attack` returns `{"run_id", "summary": {trials, trials_with_violation, races_observed, per_invariant, invariants_used, human_approved}, "first_failing_trial": Trial result | null}`; `POST .../repair` returns `{"attempts": [RepairAttempt], "accepted": bool, "negative_control": {"buggy_code_accepted", "validator_working", "reason"}, "evidence": Trial result}`
+- Invariants carry an optional `note` (why the filter dropped / kept it). Only one operation runs at a time: a second request gets HTTP 409.
+- Run the API from the repo root: `python -m uvicorn orchestrator.api:app --port 9000` (CORS allows http://localhost:3000). Needs `GH_DATABASE_URL` and the target app running in `MODE=vuln`.
 - Until each endpoint is live, the dashboard uses the mock files in `docs/examples/`.
