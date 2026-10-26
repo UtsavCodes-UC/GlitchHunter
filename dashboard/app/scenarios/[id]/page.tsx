@@ -1,11 +1,11 @@
 "use client";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useState } from "react";
-import { attack as runAttack, propose, repair as runRepair, runFilter, setInvariantStatus } from "@/lib/api";
+import { useEffect, useState } from "react";
+import { attack as runAttack, listScenarios, propose, repair as runRepair, runFilter, setInvariantStatus } from "@/lib/api";
 import { copyFor, strategyLabel } from "@/lib/copy";
 import { useScenario } from "@/lib/useScenario";
-import type { Invariant, RepairAttempt } from "@/lib/types";
+import type { Invariant, RepairAttempt, Scenario } from "@/lib/types";
 import Story from "@/components/Story";
 import { Busy, ErrorBox } from "@/components/ui";
 
@@ -57,7 +57,7 @@ function Check({ group, onDecide }: { group: Invariant[]; onDecide: (g: Invarian
   );
 }
 
-function FixResult({ attempts, accepted, control }: { attempts: RepairAttempt[]; accepted: boolean; control: { validator_working: boolean; reason: string } }) {
+function FixResult({ attempts, accepted, control, custom }: { attempts: RepairAttempt[]; accepted: boolean; control: { validator_working: boolean; reason: string }; custom?: boolean }) {
   const final = attempts.find((a) => a.accepted) ?? attempts[attempts.length - 1];
   const earlier = attempts.filter((a) => a !== final);
   const v = final?.validation;
@@ -76,7 +76,8 @@ function FixResult({ attempts, accepted, control }: { attempts: RepairAttempt[];
               <ul className="ticks">
                 {tick("everyday", v.regression_failures.length === 0, "Everyday use still works as before")}
                 {v.replay && tick("replay", v.replay.violations === 0, "The exact situation that broke it before no longer breaks")}
-                {v.fresh_trials?.map((f) => tick(`fresh-${f.delay_ms}`, f.violations === 0, `${f.trials} more simultaneous tries${f.delay_ms ? ` with a ${f.delay_ms} ms pause` : ""}: ${f.violations === 0 ? "none went wrong" : `${f.violations} went wrong`}`))}
+                {v.fresh_trials?.map((f, i) => tick(`fresh-${f.delay_ms}`, f.violations === 0,
+                  `${f.trials} more simultaneous tries${custom ? ` (batch ${i + 1})` : f.delay_ms ? ` with a ${f.delay_ms} ms pause` : ""}: ${f.violations === 0 ? "none went wrong" : `${f.violations} went wrong`}`))}
               </ul>
               {v.throughput_rps !== undefined && <p className="small muted">Speed check: about {v.throughput_rps} requests per second (a single quick measurement).</p>}
             </>
@@ -102,7 +103,10 @@ function FixResult({ attempts, accepted, control }: { attempts: RepairAttempt[];
 
 export default function ScenarioPage() {
   const { id } = useParams<{ id: string }>();
-  const copy = copyFor(id);
+  const [meta, setMeta] = useState<Scenario | null>(null);
+  useEffect(() => { listScenarios().then((l) => setMeta(l.find((s) => s.id === id) ?? null)).catch(() => { /* wording falls back to generic */ }); }, [id]);
+  const copy = copyFor(id, meta);
+  const custom = !!meta?.custom;
   const sc = useScenario(id);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -134,9 +138,14 @@ export default function ScenarioPage() {
         <div className="secbody">
           <h2>See the bug</h2>
           <p className="muted">We send the requests at the same instant, 50 times, and look at what happens.</p>
-          <button disabled={busy !== null} onClick={() => run("attack", async () => { sc.setAttack(await runAttack(id, { trials: 50, delay_ms: 0 })); })}>
+          {custom && <div className="notice-box" style={{ margin: "8px 0 12px" }}>
+            Your own app: <b>start with step 2</b>. GlitchHunter cannot know what “correct” means for your data, so the AI suggests checks and you choose which ones to use. Then come back here.
+            To make timing problems easier to catch, we slow down your app&apos;s database reads slightly in our test copy; your files are never changed.
+          </div>}
+          <button disabled={busy !== null || (custom && selected === 0)} onClick={() => run("attack", async () => { sc.setAttack(await runAttack(id, { trials: 50, delay_ms: 0 })); })}>
             {busy === "attack" ? "Sending requests…" : copy.attackButton}
           </button>{" "}
+          {custom && selected === 0 && <span className="small muted">Choose at least one check in step 2 first.</span>}
           {busy === "attack" && <Busy text="Hitting the app 50 times…" />}
           {a && (
             <div style={{ marginTop: 16 }}>
@@ -145,7 +154,7 @@ export default function ScenarioPage() {
                   ? `It went wrong in ${a.summary.trials_with_violation} of ${a.summary.trials} tries.`
                   : `It did not go wrong in these ${a.summary.trials} tries. Try again.`}
               </div>
-              {t && <div style={{ marginTop: 12 }}><h3>One of the failed tries</h3><Story trial={t} scenarioId={id} /></div>}
+              {t && <div style={{ marginTop: 12 }}><h3>One of the failed tries</h3><Story trial={t} scenarioId={id} meta={meta} /></div>}
             </div>
           )}
         </div>
@@ -156,10 +165,11 @@ export default function ScenarioPage() {
         <div className="secbody">
           <h2>How does the app know it went wrong?</h2>
           <p className="muted">
-            A <b>check</b> is a statement that must always be true, such as “money that left the wallet plus money still in it equals what we started with”.
+            A <b>check</b> is a statement that must always be true{custom ? ", such as “seats left now equals seats left before, minus the seats successfully booked”" : ", such as “money that left the wallet plus money still in it equals what we started with”"}.
             If a check fails, there is a bug. The AI suggests checks, we test them, and <b>you decide which ones count</b>.
+            {custom && " Before every try we take a snapshot of your tables, so a check can compare “before” with “after”."}
           </p>
-          <button className="secondary" disabled={busy !== null} onClick={() => run("checks", async () => { await propose(id); sc.setInvariants(await runFilter(id, true)); })}>
+          <button className="secondary" disabled={busy !== null} onClick={() => run("checks", async () => { await propose(id); sc.setInvariants(await runFilter(id, !custom)); })}>
             {busy === "checks" ? "Working…" : checks.length ? "Ask the AI again" : "Ask the AI to suggest checks"}
           </button>{" "}
           {busy === "checks" && <Busy text="The AI is reading the code, then we test its checks. This can take a minute or two." />}
@@ -167,7 +177,7 @@ export default function ScenarioPage() {
             <div style={{ marginTop: 14 }}>
               <h3>Checks that can spot this bug</h3>
               {checks.map((g) => <Check key={g[0].id} group={g} onDecide={decide} />)}
-              <p className="small muted">{selected} selected. If you select none, we use a built-in check. Your choices are used the next time you press the button in step 1 or step 3.</p>
+              <p className="small muted">{selected} selected. {custom ? "Your app has no built-in check, so choose at least one." : "If you select none, we use a built-in check."} Your choices are used the next time you press the button in step 1 or step 3.</p>
             </div>
           )}
           {thrown.length > 0 && (
@@ -188,12 +198,12 @@ export default function ScenarioPage() {
         <div className="secnum">3</div>
         <div className="secbody">
           <h2>Fix it, then prove the fix</h2>
-          <p className="muted">The AI writes a fix. We run it on a <b>copy</b> of the app and only accept it if it passes every test.</p>
+          <p className="muted">The AI writes a fix. We run it on a <b>copy</b> of the app and only accept it if it passes every test.{custom && " Your uploaded files are never changed: the fix is shown as code you can copy into your app."}</p>
           <button disabled={busy !== null} onClick={() => run("repair", async () => { sc.setRepair(await runRepair(id, { k: 50, max_attempts: 3 })); })}>
             {busy === "repair" ? "Working on a fix…" : "Ask the AI for a fix and test it"}
           </button>{" "}
           {busy === "repair" && <Busy text="The AI writes a fix, then we test it 100+ times. This takes 1 to 3 minutes." />}
-          {r && <div style={{ marginTop: 16 }}><FixResult attempts={r.attempts} accepted={r.accepted} control={r.negative_control} /></div>}
+          {r && <div style={{ marginTop: 16 }}><FixResult attempts={r.attempts} accepted={r.accepted} control={r.negative_control} custom={custom} /></div>}
         </div>
       </section>
     </>

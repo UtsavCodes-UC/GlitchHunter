@@ -10,6 +10,17 @@ export default function Home() {
   const [scenarios, setScenarios] = useState<Scenario[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => { listScenarios().then(setScenarios).catch((e) => setError((e as Error).message)); }, []);
+  const demos = scenarios?.filter((s) => !s.custom) ?? [], mine = scenarios?.filter((s) => s.custom) ?? [];
+  const card = (s: Scenario) => {
+    const c = copyFor(s.id, s);
+    return (
+      <Link key={s.id} href={`/scenarios/${s.id}`} className="card pick">
+        <h3>{c.title}</h3>
+        <p className="muted" style={{ margin: "4px 0 12px" }}>{c.story}</p>
+        <span className="btn">Start →</span>
+      </Link>
+    );
+  };
   return (
     <>
       <h1>Does your app break when two people click at the same time?</h1>
@@ -25,17 +36,16 @@ export default function Home() {
       <h2>Pick an example to try</h2>
       <ErrorBox message={error} />
       {!scenarios && !error && <p className="muted">Loading…</p>}
+      <div className="cards">{demos.map(card)}</div>
+
+      <h2 style={{ marginTop: 32 }}>Or try your own app</h2>
       <div className="cards">
-        {scenarios?.map((s) => {
-          const c = copyFor(s.id);
-          return (
-            <Link key={s.id} href={`/scenarios/${s.id}`} className="card pick">
-              <h3>{c.title}</h3>
-              <p className="muted" style={{ margin: "4px 0 12px" }}>{c.story}</p>
-              <span className="btn">Start →</span>
-            </Link>
-          );
-        })}
+        <Link href="/try" className="card pick own">
+          <h3>＋ Upload your own FastAPI app</h3>
+          <p className="muted" style={{ margin: "4px 0 12px" }}>Bring a small FastAPI + PostgreSQL app and a setup SQL script. We attack one of its endpoints and test a fix.</p>
+          <span className="btn">Upload an app →</span>
+        </Link>
+        {mine.map(card)}
       </div>
     </>
   );

@@ -5,7 +5,7 @@ from controller import attacker
 
 def run_filter(cfg, sc, invs, sequential_trials=10, trials=50, delay=0):
     cand = {i["id"]: i["sql"] for i in invs if i["status"] in ("proposed", "uninformative", "dropped")}
-    admin, ro, cl = attacker.connect(cfg), attacker.connect(cfg, True), attacker.client(sc["base_url"])
+    admin, ro, cl = attacker.connect(cfg, sc=sc), attacker.connect(cfg, True, sc), attacker.client(sc["base_url"])
     seq = {k: 0 for k in cand}; conc = {k: 0 for k in cand}; hit = {k: 0 for k in cand}; races = 0
     try:
         for _ in range(sequential_trials):
@@ -25,6 +25,9 @@ def run_filter(cfg, sc, invs, sequential_trials=10, trials=50, delay=0):
         elif not conc[k]: i["status"], i["note"] = "uninformative", "never fires under concurrency, cannot detect this bug"
         else:
             i["status"] = "proposed"
-            i["note"] = ("passes the filter; needs human approval" if recall is not None and recall >= 0.9
-                         else "fires under concurrency but recall is below 0.9 or no race was observed; review carefully")
+            if sc.get("custom"):  # no race oracle exists for an uploaded app, so recall cannot be measured
+                i["note"] = "quiet on one-at-a-time runs, raises the alarm under simultaneous requests; needs human approval (recall not measured for uploaded apps)"
+            else:
+                i["note"] = ("passes the filter; needs human approval" if recall is not None and recall >= 0.9
+                             else "fires under concurrency but recall is below 0.9 or no race was observed; review carefully")
     return invs

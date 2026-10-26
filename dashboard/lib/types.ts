@@ -45,8 +45,35 @@ export interface TrialResult {
 
 export interface Scenario {
   id: string;
+  title?: string | null;     // set for uploaded apps
+  custom?: boolean;          // true for uploaded apps ("Try your own app")
+  race_n?: number | null;    // simultaneous requests per try
   endpoint: { method: string; path: string; params: Record<string, number | string> };
   invariants: number;
+}
+
+export interface ProjectEndpoint {
+  method: string;
+  path: string;
+  function: string;
+  file: string;
+  params: { name: string; type: string }[];
+  sample_params: Record<string, number | string>;
+  supported: boolean;
+  unsupported_reason: string;
+  hint: string;
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  filename: string;
+  tables: string[];
+  db_env: string;
+  entry: { file: string; module: string; var: string };
+  endpoints: ProjectEndpoint[];
+  suggested_state: { table: string; column: string } | null;
+  warnings: string[];
 }
 
 export interface AttackSummary {

@@ -33,6 +33,8 @@ Live mode needs, from the repo root:
   2. **How does the app know it went wrong?**: AI-suggested "checks" in plain English; you choose which to use (technical details and SQL are behind "Why we trust it"); thrown-out checks are listed with the reason
   3. **Fix it, then prove the fix**: what the AI changed, a tick-list of how it was tested, earlier rejected attempts, and the note that the original buggy code was rejected by the same tests
 
+- `/try` upload your own FastAPI + PostgreSQL app (live mode only): see `docs/try_your_own_app.md` for what it needs and its limits
+
 Wording for each scenario lives in `lib/copy.ts`; add an entry there for a new scenario (a generic fallback is used otherwise).
 The last attack and repair result are kept in sessionStorage because the API does not store them.
 

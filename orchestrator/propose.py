@@ -22,10 +22,10 @@ def validate_sql(ro, sql):
 
 def propose(cfg, sc, samples=3):
     """returns (invariants in the contract shape, stats). Needs the app running (tables are read from the live database)."""
-    admin, ro, cl = attacker.connect(cfg), attacker.connect(cfg, True), attacker.client(sc["base_url"])
+    admin, ro, cl = attacker.connect(cfg, sc=sc), attacker.connect(cfg, True, sc), attacker.client(sc["base_url"])
     try:
-        attacker.prepare(cl, admin, sc)  # make sure tables, ops_log and initial_state exist so the schema text is complete
-        prompt = TEMPLATE.read_text(encoding="utf-8").replace("{APP}", context.app_text(cfg, sc))
+        attacker.prepare(cl, admin, sc)  # make sure tables, ops_log and the starting state exist so the schema text is complete
+        prompt = context.template_for(sc).read_text(encoding="utf-8").replace("{APP}", context.app_text(cfg, sc))
         out, seen, total, valid, parse_fail = [], set(), 0, 0, 0
         llm_errors = []
         for k in range(samples):

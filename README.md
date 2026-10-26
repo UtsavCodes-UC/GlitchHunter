@@ -2,18 +2,37 @@
 
 Finds, reproduces and validates concurrency bugs (race conditions) in database-backed APIs, and checks AI-proposed fixes by rerunning the failing run.
 
-Built during Hackman X (26–27 Oct 2026).
+Built during Hackman X (26–27 Oct 2026). See `docs/prototype_note.md` for what existed before the event.
 
-Loop: propose invariants → filter → attack → explain → repair.
+Loop: propose checks → filter → attack → explain → repair.
+
+## Three ways to use it
+- **Dashboard** (`dashboard/`): a guided page per example in plain language, plus "Try your own app".
+- **Command line** (`cli/`): `.\glitchhunter doctor`, `scan`, `checks`, `repair`, `test`, `upload`, `demo`. See `docs/cli.md`.
+- **API** (`orchestrator/`): what the dashboard calls. Contract in `docs/contracts.md`.
+
+## Quick start (Windows, PowerShell, PostgreSQL 16 running)
+```powershell
+$env:GH_DATABASE_URL="postgresql://rh:rh@localhost:5432/rh"   # database rh, user rh
+pip install -r requirements.txt
+cd apps; $env:MODE="vuln"; python -m uvicorn wallet_app:app --port 8000     # terminal 1: the buggy demo app
+cd ..; .\glitchhunter doctor                                                 # terminal 2: check the setup
+.\glitchhunter demo wallet                                                   # the whole loop in one command
+```
+The AI steps use `GEMINI_API_KEY` (environment variable, never a file). If Gemini is unavailable they fall back to a local Ollama model.
 
 ## Layout
 - `apps/` demo target apps (wallet, inventory)
-- `controller/` attacker, runners, replay
-- `orchestrator/` FastAPI, LLM client, propose, filter, repair (`prompts/`)
+- `controller/` attacker, validator, test generator, request log
+- `orchestrator/` API, AI client, propose / filter / repair, uploaded-project handling
+- `cli/` the command line
 - `dashboard/` Next.js UI
-- `cli/` command line over the same modules
-- `docs/` contracts, claims, decisions
+- `examples/` a sample app to upload
+- `docs/` contracts, CLI, upload feature, head-to-head results, notes
 - `runs/` generated output (git-ignored)
 
+## What it does and does not claim
+It reproduces a race and validates a fix by rerunning the failing run and fresh simultaneous trials. It does not prove a race is gone, and the AI does not discover business rules on its own: it proposes checks from a template and a person decides which to use. It has only been run on demo apps we wrote plus one sample uploaded app. Prior art: ACIDRain and Raccoon.
+
 ## Secrets
-API keys are read from environment variables only (e.g. `GEMINI_API_KEY`). Never commit them.
+API keys are read from environment variables only (`GEMINI_API_KEY`). Never commit them.

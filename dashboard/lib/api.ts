@@ -1,5 +1,5 @@
 // One function per endpoint in docs/contracts.md. NEXT_PUBLIC_USE_MOCK=true returns the JSON in ../mock instead of calling the API.
-import type { AttackResponse, Invariant, InvariantStatus, RepairResponse, RunResponse, Scenario } from "./types";
+import type { AttackResponse, Invariant, InvariantStatus, Project, RepairResponse, RunResponse, Scenario } from "./types";
 import scenariosMock from "../mock/scenarios.json";
 import invariantsMock from "../mock/invariants.json";
 import attackMock from "../mock/attack.json";
@@ -70,6 +70,18 @@ export async function attack(id: string, opts: { trials: number; delay_ms: numbe
 export async function repair(id: string, opts: { k: number; max_attempts: number }): Promise<RepairResponse> {
   if (USE_MOCK) { await sleep(1500); return mock<RepairResponse>(repairMock); }
   return call("POST", `/scenarios/${id}/repair`, opts);
+}
+
+const needLive = () => { throw new Error("“Try your own app” needs live mode: set NEXT_PUBLIC_USE_MOCK=false in dashboard/.env.local and restart the dashboard."); };
+
+export async function uploadProject(p: { name: string; filename: string; content_b64: string; setup_sql: string; db_env: string }): Promise<Project> {
+  if (USE_MOCK) return needLive();
+  return call("POST", "/projects", p);
+}
+
+export async function createScenario(pid: string, p: { method: string; path: string; params: Record<string, unknown>; race_n: number; state?: { table: string; column: string } | null }): Promise<{ id: string; title: string }> {
+  if (USE_MOCK) return needLive();
+  return call("POST", `/projects/${pid}/scenario`, p);
 }
 
 export async function getRun(runId: string): Promise<RunResponse> {

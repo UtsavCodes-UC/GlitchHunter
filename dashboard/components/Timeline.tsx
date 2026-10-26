@@ -23,7 +23,7 @@ export default function Timeline({ requests }: { requests: RequestRecord[] }) {
         </div>
       ))}
       <div className="tl-axis"><span>0 ms</span><span>{max.toFixed(0)} ms</span></div>
-      {overlap && <div className="small muted" style={{ marginTop: 6 }}>Both were being handled together for {(oEnd - oStart).toFixed(0)} ms.</div>}
+      {overlap && <div className="small muted" style={{ marginTop: 6 }}>{requests.length === 2 ? "Both were" : "All were"} being handled together for {(oEnd - oStart).toFixed(0)} ms.</div>}
     </div>
   );
 }
