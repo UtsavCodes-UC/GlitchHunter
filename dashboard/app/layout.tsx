@@ -18,7 +18,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <header className="topbar">
           <div className="topbar-in">
             <Link href="/" className="brand">Glitch<span>Hunter</span></Link>
-            <span className="muted small">finds concurrency bugs and validates fixes by rerunning the failing run</span>
           </div>
         </header>
         <main>{children}</main>

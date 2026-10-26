@@ -27,12 +27,13 @@ Live mode needs, from the repo root:
 
 ## Pages
 
-- `/` scenarios and the five stage statuses
-- `/scenarios/<id>` overview with a button per stage
-- `/scenarios/<id>/invariants` rules, filter results, Approve / Reject
-- `/scenarios/<id>/attack` summary, timeline of the overlapping requests, plain-words explanation
-- `/scenarios/<id>/repair` fix attempts with validation results, accepted / rejected, and the negative control
+- `/` what the tool does in three sentences, and a pick-an-example screen
+- `/scenarios/<id>` one guided page in plain language:
+  1. **See the bug**: simultaneous requests, "it went wrong in N of 50 tries", and one failed try told as a story (Person A, Person B, what each was told, why the result is wrong) plus a timeline
+  2. **How does the app know it went wrong?**: AI-suggested "checks" in plain English; you choose which to use (technical details and SQL are behind "Why we trust it"); thrown-out checks are listed with the reason
+  3. **Fix it, then prove the fix**: what the AI changed, a tick-list of how it was tested, earlier rejected attempts, and the note that the original buggy code was rejected by the same tests
 
+Wording for each scenario lives in `lib/copy.ts`; add an entry there for a new scenario (a generic fallback is used otherwise).
 The last attack and repair result are kept in sessionStorage because the API does not store them.
 
 ## Wording rules

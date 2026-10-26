@@ -12,18 +12,18 @@ export default function Timeline({ requests }: { requests: RequestRecord[] }) {
     <div className="timeline" role="img" aria-label="Timeline of the simultaneous requests">
       {requests.map((r) => (
         <div className="tl-row" key={r.req}>
-          <div className="tl-label">req {r.req}</div>
+          <div className="tl-label">Person {String.fromCharCode(65 + r.req)}</div>
           <div className="tl-track">
             {overlap && <div className="tl-overlap" style={{ left: pct(oStart), width: `${((oEnd - oStart) / max) * 100}%` }} />}
             <div className={`tl-bar ${r.status === 200 ? "s200" : r.status === 409 ? "s409" : "sother"}`}
                  style={{ left: pct(r.start_ms), width: `${Math.max(((r.end_ms - r.start_ms) / max) * 100, 6)}%` }}>
-              HTTP {r.status} · {r.method} {r.path}
+              {r.status === 200 ? "approved" : r.status === 409 ? "refused" : `error ${r.status}`}
             </div>
           </div>
         </div>
       ))}
-      <div className="tl-axis"><span>0 ms</span><span>{(max / 2).toFixed(0)} ms</span><span>{max.toFixed(0)} ms</span></div>
-      {overlap && <div className="small muted" style={{ marginTop: 8 }}>Shaded: all requests were in flight together for {(oEnd - oStart).toFixed(1)} ms, the window where both could pass the check before either wrote.</div>}
+      <div className="tl-axis"><span>0 ms</span><span>{max.toFixed(0)} ms</span></div>
+      {overlap && <div className="small muted" style={{ marginTop: 6 }}>Both were being handled together for {(oEnd - oStart).toFixed(0)} ms.</div>}
     </div>
   );
 }
