@@ -36,8 +36,9 @@ If the ✔ / ✖ symbols look garbled (for example when you redirect output to a
 | `repair SCENARIO [--k 50] [--attempts 3] [--code]` | the AI writes a fix, tested on a copy of the app; saves the accepted function under `runs/patches/`; **exit 0 only if accepted** |
 | `replay FILE.json [--trials 20]` | re-runs a saved failing schedule (written by `scan` under `runs/<run_id>/`) |
 | `test SCENARIO` | writes a regression test from a failing run to `tests/generated/` (demo scenarios) |
-| `upload --name N --app FILE --sql FILE [--env-var NAME=value ...] [--db-scheme postgresql+psycopg2] [--header 'Authorization: Bearer x'] [--endpoint "POST /api/v1/orders"] [--body JSON] [--params JSON] [--path-params JSON] [--qty-key quantity] [-n 6] [--state table.column]` | adds your own FastAPI + PostgreSQL app as scenario `custom_<id>`. It starts the app once to read its routes, prints them with flags, and picks the best candidate unless you name one. Body, number to watch and quantity field are guessed when omitted (checklist and limits: `docs/try_your_own_app.md`) |
-| `delete-project ID` | removes an uploaded app, its files and its database schema |
+| `upload PATH [--name N]` | adds your own code (a .zip, a folder or one .py): it is only scanned, not run; prints the endpoints with hints |
+| `setup ID [--config FILE]` | saves the setup (default: the suggested one) and tests it once in isolation, with a live log |
+| `delete-project ID` | removes an uploaded project: files, database role and schema, results |
 | `demo SCENARIO [--no-decoys]` | the whole loop in one go (propose, filter, approve, attack, repair, control) |
 
 ## Typical session (demo apps)
@@ -51,18 +52,34 @@ Start the target app first (see `apps/README.md`, for example the vulnerable wal
 .\glitchhunter test wallet
 ```
 
-## Your own app
+## Install it as a command (works from any folder)
+From the repo root, once:
 ```powershell
-.\glitchhunter upload --name "Ticket shop" --app examples\ticket_shop\ticket_shop.py --sql examples\ticket_shop\setup.sql
-.\glitchhunter checks custom_ticket_shop_xxxx --propose --filter --auto-approve
-.\glitchhunter scan custom_ticket_shop_xxxx
-.\glitchhunter repair custom_ticket_shop_xxxx
+python -m pip install -e .
 ```
-A package-style app with routers, a JSON body and a login token (zip the folder, add its settings):
+This puts a `glitchhunter` command on your PATH (in the Python `Scripts` folder; if PowerShell says it is not recognised, add that folder to PATH, or use `python -m cli ...`). The install is *editable*: it points at this repo, so keep the repo where it is (the command reads its prompts and writes runs under `runs/`). To keep it out of your global Python, install it into a virtual environment: `python -m venv .venv; .venv\Scripts\activate; python -m pip install -e .`.
+Set the database once per terminal (and `GEMINI_API_KEY` for the AI): `$env:GH_DATABASE_URL="postgresql://rh:rh@localhost:5432/rh"`. Then `glitchhunter doctor`.
+
+## One command for the whole loop: `fix`
 ```powershell
-.\glitchhunter upload --name "Shop" --app shop.zip --sql setup.sql --db-scheme postgresql+psycopg2 --env-var API_TOKEN=test-token --header "Authorization: Bearer test-token"
+glitchhunter fix C:\path\to\your\app            # read, set up, find the race, ask the AI for a fix, test it
+glitchhunter fix C:\path\to\your\app --apply    # ... and write the accepted fix into your file (a .glitchhunter.bak copy is kept)
 ```
-The app is started for you (with a private database schema); you do not run it yourself. `upload` prints the exact scenario id and every endpoint it found, with the reason for any it cannot use. If the app needs a header or setting you did not give, the upload is rolled back and says what is missing.
+What it does: (1) reads the folder without running it, (2) saves a setup and tests it once in isolation, (3) asks the AI for checks and keeps the ones that survive the filter, (4) attacks with simultaneous requests, (5) if something goes wrong, asks the AI for a fix and tests it on a copy, (6) shows the change as a diff. It removes its temporary project afterwards (`--keep` leaves it, so you can open it in the dashboard).
+- **It works on the source folder, not on a running server.** GlitchHunter starts its own isolated copy of your app against a private database account; the app you have open is not touched. So give it the folder, not a URL.
+- **Setup:** it uses `glitchhunter.json` in the folder if there is one, else the scan's suggestion (`--endpoint "POST /withdraw"` picks another route). If the scan cannot guess your tables it stops and prints the JSON to fill in. Every folder in `samples/` already has a `glitchhunter.json`: `glitchhunter fix samples\01-bank-psycopg2`.
+- **Exit codes:** 0 = no problem found, or a fix was accepted; 1 = a bug was found and no safe fix was accepted; 2 = setup problem.
+- The fix replaces one function and is only as good as the checks; "accepted" is evidence, not proof. Read the diff before using `--apply`.
+
+## Your own code
+```powershell
+.\glitchhunter upload samples\05-safe-shop          # scan only; prints the id, for example u1a2b3c4d5e6
+.\glitchhunter setup u1a2b3c4d5e6
+.\glitchhunter checks u1a2b3c4d5e6 --propose --filter --auto-approve
+.\glitchhunter scan u1a2b3c4d5e6
+.\glitchhunter repair u1a2b3c4d5e6
+```
+`setup` without `--config` uses the suggested setup from the scan. The app is started for you in isolation; you do not run it yourself. The database user needs `CREATEROLE` (see `docs/try_your_own_app.md`).
 
 ## In CI (idea, not set up here)
 `scan` exits 1 when it finds a violation, so a pipeline step such as `.\glitchhunter scan wallet --trials 100` fails the build when a change introduces a race. This needs a throwaway PostgreSQL and the app started in the pipeline, and it needs at least one approved check stored for the scenario.

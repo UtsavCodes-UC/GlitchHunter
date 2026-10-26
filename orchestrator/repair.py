@@ -36,7 +36,7 @@ def project_roots(sc):
 
 def file_names(sc):
     """names the endpoint file defines or imports (what a fix can use without adding an import)"""
-    try: tree = ast.parse(config.app_path(sc).read_text(encoding="utf-8"))
+    try: tree = ast.parse(config.app_path(sc).read_text(encoding="utf-8-sig"))
     except (OSError, SyntaxError): return []
     names = []
     for n in tree.body:
@@ -90,8 +90,13 @@ def repair(cfg, sc, invariants, k=50, max_attempts=3, failing=None):
         names, pause, imp = (CUSTOM_NAMES.format(names=", ".join(file_names(sc)) or "(none)", file=context.file_context(sc))
                              + (f"\n\nRELATED CODE the function uses (other files, helpers and models; context only):\n{rel}" if rel else ""), "", CUSTOM_IMPORTS)
     else: names, pause, imp = DEMO_NAMES, DEMO_PAUSE, DEMO_IMPORTS
-    evidence = (f"initial state {failing['initial_state']}; {failing['n']} simultaneous requests {ep['method']} {ep['path']} "
-                f"values {attacker.request_values(ep)}; response statuses {[r['status'] for r in failing['requests']]}; final state {failing['final_state']}.")
+    if sc.get("custom"):
+        evidence = (f"tables before the run {json.dumps(failing['initial_tables'], default=str)[:1500]}; {failing['n']} simultaneous requests {ep['method']} {ep['path']} "
+                    f"with values {json.dumps([r['params'] for r in failing['requests']])[:600]}; response statuses {[r['status'] for r in failing['requests']]}; "
+                    f"tables after the run {json.dumps(failing['final_tables'], default=str)[:1500]}.")
+    else:
+        evidence = (f"initial state {failing['initial_state']}; {failing['n']} simultaneous requests {ep['method']} {ep['path']} "
+                    f"values {attacker.request_values(ep)}; response statuses {[r['status'] for r in failing['requests']]}; final state {failing['final_state']}.")
     inv_text = json.dumps({i: " ".join(invariants[i].split()) for i in attacker.fired(failing["violations"])})
     attempts, feedback, accepted, tried = [], "", False, []
     for n in range(1, max_attempts + 1):

@@ -1,0 +1,31 @@
+{
+  "app": "main:app",
+  "file": "main.py",
+  "func": "book",
+  "method": "POST",
+  "path": "/events/{event_id}/book",
+  "body": "query",
+  "burst": [
+    {
+      "event_id": 1,
+      "seats": 1
+    },
+    {
+      "event_id": 1,
+      "seats": 1
+    },
+    {
+      "event_id": 1,
+      "seats": 1
+    },
+    {
+      "event_id": 1,
+      "seats": 1
+    }
+  ],
+  "schema_sql": "CREATE TABLE events (id serial PRIMARY KEY, name varchar(80) NOT NULL, seats_left int NOT NULL);",
+  "seed_sql": "INSERT INTO events (name, seats_left) VALUES ('Concert', 1);",
+  "db_env": "DATABASE_URL",
+  "env": {},
+  "db_scheme": "postgresql+psycopg2"
+}

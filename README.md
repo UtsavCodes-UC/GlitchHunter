@@ -7,7 +7,7 @@ Built during Hackman X (26–27 Oct 2026). See `docs/prototype_note.md` for what
 Loop: propose checks → filter → attack → explain → repair.
 
 ## Three ways to use it
-- **Dashboard** (`dashboard/`): a guided page per example in plain language, plus "Try your own app".
+- **Dashboard** (`dashboard/`): a guided page per example in plain language, plus **"Your own code"**: drop a zip, files or a folder; it is scanned statically, set up in a short form, tested once in isolation, then run through the same pipeline.
 - **Command line** (`cli/`): `.\glitchhunter doctor`, `scan`, `checks`, `repair`, `test`, `upload`, `demo`. See `docs/cli.md`.
 - **API** (`orchestrator/`): what the dashboard calls. Contract in `docs/contracts.md`.
 
@@ -28,7 +28,7 @@ The AI steps use `GEMINI_API_KEY` (environment variable, never a file). If Gemin
 - `orchestrator/` API, AI client, propose / filter / repair, uploaded-project handling
 - `cli/` the command line
 - `dashboard/` Next.js UI
-- `examples/` a sample app to upload
+- `examples/` and `samples/` apps to upload (the samples each have a `SETUP.md`, plus a verification script)
 - `docs/` contracts, CLI, upload feature, head-to-head results, notes
 - `runs/` generated output (git-ignored)
 
@@ -37,3 +37,9 @@ It reproduces a race and validates a fix by rerunning the failing run and fresh 
 
 ## Secrets
 API keys are read from environment variables only (`GEMINI_API_KEY`). Never commit them.
+
+## Your own code: isolation and one requirement
+Uploaded projects get their own PostgreSQL role and schema and run as a separate process with a minimal environment (no API keys). **The database user needs `CREATEROLE`** (`ALTER ROLE rh CREATEROLE;` as a superuser). Outbound network access is NOT restricted, and on Windows there are no resource limits: only upload code you trust. Details: `docs/try_your_own_app.md`.
+
+## Command line
+`python -m pip install -e .` installs a `glitchhunter` command. `glitchhunter fix <your app folder> [--apply]` runs the whole loop (read, set up, attack, AI fix, test, diff). See `docs/cli.md`.

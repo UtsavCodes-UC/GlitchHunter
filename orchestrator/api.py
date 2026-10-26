@@ -1,15 +1,15 @@
 """Orchestrator API (contract in docs/contracts.md). Run from the repo root:
 python -m uvicorn orchestrator.api:app --port 9000        (needs GH_DATABASE_URL, and the target app running in MODE=vuln)"""
 import os, json, time, base64, binascii, threading
-from fastapi import FastAPI, HTTPException, Body
+from fastapi import FastAPI, HTTPException, Body, Request
 from fastapi.middleware.cors import CORSMiddleware
 from controller import config, attacker
-from . import repair as rep, store, projects, runner, service
+from . import repair as rep, store, uploads, runner, service, llm
 
 app = FastAPI(title="GlitchHunter orchestrator")
 _origins = ["http://localhost:3000", "http://127.0.0.1:3000"] + [o for o in os.environ.get("GH_CORS_ORIGINS", "").split(",") if o]
 app.add_middleware(CORSMiddleware, allow_origins=_origins, allow_methods=["*"], allow_headers=["*"])
-_busy = threading.Lock()  # attacks share one database; run one operation at a time
+_busy = uploads.BUSY  # attacks share one database; run one operation at a time
 
 def _sc(name):
     cfg = config.load()
@@ -31,47 +31,91 @@ def _start(cfg, sc):
     except RuntimeError as e: raise HTTPException(409, str(e))
 
 @app.get("/health")
-def health(): return {"ok": True}
+def health(): return {"ok": True, "provider": llm.PROVIDER, "model": llm.LAST_MODEL}
 
 @app.get("/scenarios")
 def scenarios():
     cfg = config.load()
     def public_ep(ep):  # header values can be secrets (tokens): only their names leave the server
         return {**{k: val for k, val in ep.items() if k != "headers"}, "header_names": sorted((ep.get("headers") or {}))}
-    return [{"id": k, "title": v.get("title"), "custom": bool(v.get("custom")), "endpoint": public_ep(v["endpoint"]), "race_n": v.get("race_n"),
-             "qty_key": v.get("qty_key"), "invariants": len(store.load_invariants(k))} for k, v in cfg["scenarios"].items()]
+    stats = _run_stats()
+    out = []
+    for k, v in cfg["scenarios"].items():
+        invs = store.load_invariants(k)
+        out.append({"id": k, "title": v.get("title"), "custom": bool(v.get("custom")), "endpoint": public_ep(v["endpoint"]), "race_n": v.get("race_n"),
+                    "burst": v.get("burst"), "invariants": len(invs), "rules_approved": sum(1 for i in invs if i["status"] == "approved"),
+                    "failing_runs": stats["failing"].get(k, 0), "fixes_accepted": stats["fixes"].get(k, 0)})
+    return out
 
-# ---- Try your own app: upload a FastAPI app + setup SQL, pick an endpoint, get a scenario ----
-@app.post("/projects")
-def create_project(body: dict = Body(...)):
+def _run_stats():
+    """what the saved runs on this machine say: failing tries found per scenario, and accepted fixes per scenario"""
+    runs = config.ROOT / "runs"; failing, fixes = {}, {}
+    for f in runs.glob("*/summary.json"):
+        try: s = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError): continue
+        if s.get("scenario"): failing[s["scenario"]] = failing.get(s["scenario"], 0) + int(s.get("trials_with_violation") or 0)
+    for f in runs.glob("repair_*.json"):
+        try: r = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError): continue
+        sid = f.stem[len("repair_"):].rsplit("_", 1)[0]
+        if r.get("accepted"): fixes[sid] = fixes.get(sid, 0) + 1
+    return {"failing": failing, "fixes": fixes}
+
+# ---- Your own code: upload (static scan) -> setup -> "save and test" job -> a normal scenario ----
+@app.post("/api/uploads")
+async def upload(request: Request):
+    """multipart: field `name` (optional) and one or more `files` (a .zip, loose files, or a picked folder: the file name carries its relative path)"""
+    lim = uploads.LIMITS(); form = await request.form()
+    items = []
+    for f in form.getlist("files"):
+        data = await f.read(lim["file"] + 1 if not f.filename.lower().endswith(".zip") else lim["zip"] + 1)
+        items.append((f.filename, data))
+    if not items: raise HTTPException(422, "choose a .zip, some files or a folder")
     cfg = config.load()
-    try: content = base64.b64decode(body.get("content_b64", ""), validate=True)
-    except (binascii.Error, ValueError): raise HTTPException(422, "the uploaded file could not be read")
-    if not str(body.get("name", "")).strip() or not body.get("filename") or not str(body.get("setup_sql", "")).strip():
-        raise HTTPException(422, "a name, an app file and the setup SQL are all required")
     with _One():
-        try: return projects.create(cfg, str(body["name"]).strip()[:60], str(body["filename"]), content, str(body["setup_sql"]),
-                                    body.get("db_env") or "DATABASE_URL", body.get("env") or {}, body.get("db_scheme") or "postgresql")
+        try: return uploads.create(cfg, str(form.get("name") or ""), items)
         except ValueError as e: raise HTTPException(422, str(e))
 
-@app.get("/projects")
-def list_projects(): return projects.list_all()
+@app.get("/api/uploads")
+def list_uploads(): return uploads.list_all()
 
-@app.post("/projects/{pid}/scenario")
-def make_scenario(pid, body: dict = Body(...)):
-    try:
-        sc = projects.create_scenario(pid, str(body.get("method", "")), str(body.get("path", "")), body.get("params"), body.get("race_n") or 6, body.get("state"),
-                                      body.get("path_params"), body.get("json"), body.get("headers"), body.get("qty_key") or None, body.get("pause_ms"))
+def _up(pid):
+    try: return uploads.get(pid)
     except KeyError: raise HTTPException(404, "no such project")
-    except ValueError as e: raise HTTPException(422, str(e))
-    return {"id": sc["id"], "title": sc["title"]}
 
-@app.delete("/projects/{pid}")
-def delete_project(pid):
-    cfg = config.load()
+@app.get("/api/uploads/{pid}")
+def get_upload(pid): return uploads.public(_up(pid), full=True)
+
+@app.get("/api/uploads/{pid}/source")
+def upload_source(pid, path: str, fn: str):
+    _up(pid)
+    try: return uploads.source(pid, path, fn)
+    except KeyError: raise HTTPException(404, "that function was not found")
+
+@app.put("/api/uploads/{pid}/config")
+def put_config(pid, body: dict = Body(...)):
+    _up(pid)
     with _One():
-        try: projects.delete(cfg, pid)
-        except KeyError: raise HTTPException(404, "no such project")
+        try: return uploads.save_setup(pid, body)
+        except ValueError as e: raise HTTPException(422, str(e))
+
+@app.post("/api/uploads/{pid}/check")
+def start_check(pid):
+    _up(pid); cfg = config.load()
+    try: return {"job": uploads.start_check(cfg, pid)}
+    except ValueError as e: raise HTTPException(422, str(e))
+
+@app.get("/api/uploads/{pid}/jobs/{jid}")
+def get_job(pid, jid):
+    try: return uploads.get_job(pid, jid)
+    except KeyError: raise HTTPException(404, "no such job")
+
+@app.delete("/api/uploads/{pid}")
+def delete_upload(pid):
+    cfg = config.load(); _up(pid)
+    with _One():
+        try: uploads.delete(cfg, pid)
+        except RuntimeError as e: raise HTTPException(409, str(e))
     return {"ok": True}
 
 @app.get("/scenarios/{sid}/invariants")

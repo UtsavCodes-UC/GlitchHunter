@@ -1,0 +1,30 @@
+{
+  "app": "main:app",
+  "file": "main.py",
+  "func": "buy",
+  "method": "POST",
+  "path": "/buy",
+  "body": "query",
+  "burst": [
+    {
+      "item_id": 1,
+      "qty": 1
+    },
+    {
+      "item_id": 1,
+      "qty": 1
+    },
+    {
+      "item_id": 1,
+      "qty": 1
+    },
+    {
+      "item_id": 1,
+      "qty": 1
+    }
+  ],
+  "schema_sql": "CREATE TABLE items (id int PRIMARY KEY, stock int NOT NULL);",
+  "seed_sql": "INSERT INTO items VALUES (1, 1);",
+  "db_env": "DATABASE_URL",
+  "env": {}
+}

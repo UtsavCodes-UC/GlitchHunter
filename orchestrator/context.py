@@ -1,7 +1,7 @@
 """What the LLM sees about a scenario: the endpoint code (vulnerable branch only) and the live table schema.
 The demo app files hold both MODE branches in one function; showing the fixed branch would hand over the repair, so it is stripped.
 Uploaded apps (sc["custom"]) have no MODE branches, so their code is shown as it is."""
-import ast, json
+import ast, json, re
 from controller import config, attacker, validate
 
 PROMPTS = config.ROOT / "orchestrator" / "prompts"
@@ -22,7 +22,7 @@ def template_for(sc):
 def vuln_function(sc):
     """(source text of the vulnerable endpoint function incl. decorators, its `def` line). Uploaded apps: the exact original text."""
     import textwrap
-    src = config.app_path(sc).read_text(encoding="utf-8"); a, b = validate.endpoint_region(src, sc)
+    src = config.app_path(sc).read_text(encoding="utf-8-sig"); a, b = validate.endpoint_region(src, sc)
     text = textwrap.dedent(src[a:b]) if sc.get("custom") else src[a:b]
     tree = ast.parse(text)
     fn = next(n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)))
@@ -39,14 +39,14 @@ def related(sc):
 
 def file_context(sc, limit=12000):
     """the whole endpoint file, so the LLM can see helper names and imports (uploaded apps only; truncated)"""
-    return config.app_path(sc).read_text(encoding="utf-8")[:limit]
+    return config.app_path(sc).read_text(encoding="utf-8-sig")[:limit]
 
 def schema_text(cfg, sc):
     """CREATE TABLE text read from the live database (so the LLM sees exactly what is stored)"""
     admin = attacker.connect(cfg, sc=sc); lines = []
     try:
         with admin.cursor() as cur:
-            for t in sc["tables"]:
+            for t in (attacker.app_tables(cur) if sc.get("custom") else sc["tables"]):
                 cur.execute("select column_name, data_type from information_schema.columns where table_schema = current_schema() "
                             "and table_name = %s order by ordinal_position", (t,))
                 cols = ", ".join(f"{c} {d}" for c, d in cur.fetchall())
@@ -58,12 +58,14 @@ def app_text(cfg, sc):
     code, _ = vuln_function(sc)
     path = sc["endpoint"]["path"]
     if sc.get("custom"):
-        snaps = ", ".join(f"snap_{t}" for t in sc["tables"]); rel = related(sc)
-        ep = sc["endpoint"]; body = f" and JSON body {json.dumps(ep['json'])}" if ep.get("json") is not None else ""
-        return (f"Schema (the app's own tables; they hold the FINAL state after the run):\n{schema_text(cfg, sc)}\n"
-                f"Before every run each table T is copied to snap_T ({snaps}), so snap_T holds the state BEFORE the run.\nCode:\n{code}\n"
+        schema = schema_text(cfg, sc); names = re.findall(r"CREATE TABLE (\w+)", schema); rel = related(sc); ep = sc["endpoint"]
+        snaps = ", ".join(f"initial_{t}" for t in names)
+        how = "in the query string" if ep.get("body") == "query" else "as a JSON body"
+        return (f"Schema (the app's own tables; they hold the FINAL state after the run):\n{schema}\n"
+                f"Before every run each table T is copied to initial_T ({snaps}), so initial_T holds the state BEFORE the run.\nCode:\n{code}\n"
                 + (f"Related code the endpoint uses (helpers and models):\n{rel}\n" if rel else "")
-                + f"Each request is {ep['method']} {path} with values {json.dumps({**(ep.get('path_params') or {}), **ep['params']})}{body}. "
+                + f"Each try sends {len(sc['burst'])} requests at the same time: {ep['method']} {path}, one JSON object of values per request: {json.dumps(sc['burst'])[:800]}. "
+                f"Values named like a {{placeholder}} in the path go in the address; the others are sent {how}. "
                 f"In ops_log, the endpoint column holds the request path WITH a leading slash: '{path}'. "
                 f"ALL the request's values (path values, query values and the JSON body's top-level fields) are in ops_log.params (jsonb), for example (params->>'quantity')::int.")
     return (f"Schema:\n{schema_text(cfg, sc)}\nCode:\n{code}\n"

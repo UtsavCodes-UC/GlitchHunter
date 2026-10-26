@@ -44,7 +44,7 @@ def patched_source(src, sc, code):
 def same_decorators(sc, code):
     """a fix for an uploaded app must keep the handler's decorators (they define its route and its dependencies)"""
     import ast
-    src = config.app_path(sc).read_text(encoding="utf-8"); a, b = endpoint_region(src, sc)
+    src = config.app_path(sc).read_text(encoding="utf-8-sig"); a, b = endpoint_region(src, sc)
     orig = ast.parse(src[a:b]).body[0]; new = ast.parse(code).body[0]
     return [ast.unparse(d) for d in orig.decorator_list] == [ast.unparse(d) for d in new.decorator_list]
 
@@ -55,21 +55,25 @@ def _env(cfg, sc):
 @contextlib.contextmanager
 def server(sc, code=None, name="candidate_app", cfg=None):
     """run a copy of the app with the endpoint function replaced by `code` (None = unchanged) on candidate_port"""
-    out = config.ROOT / "runs" / "repair"; out.mkdir(parents=True, exist_ok=True)
-    if sc.get("custom"):
-        src_dir = pathlib.Path(sc["project_dir"]); work = out / sc["project_id"]
-        shutil.rmtree(work, ignore_errors=True); shutil.copytree(src_dir, work)
-        target = work / pathlib.Path(sc["app_file"]).relative_to(src_dir); text = target.read_text(encoding="utf-8")
+    out = config.ROOT / "runs" / "repair"; out.mkdir(parents=True, exist_ok=True); port = sc["candidate_port"]
+    if sc.get("custom"):   # same isolation as the original app: fresh temp copy of the files (fix applied), minimal environment, own database role
+        from . import sandbox
+        work = sandbox.fresh_copy(sc["project_dir"], sc["project_id"] + "_cand")
+        target = work / "app" / pathlib.Path(sc["app_file"]).relative_to(pathlib.Path(sc["project_dir"])); text = target.read_text(encoding="utf-8-sig")
         if code: target.write_text(patched_source(text, sc, code), encoding="utf-8")
-        cwd, module = work, f"{sc['entry']['module']}:{sc['entry']['var']}"
-    else:
-        src = config.app_path(sc).read_text(encoding="utf-8")
-        (out / f"{name}.py").write_text(patched_source(src, sc, code) if code else src, encoding="utf-8")
-        cwd, module = out, f"{name}:app"
-    port = sc["candidate_port"]
+        logpath = out / f"{name}.log"; p = sandbox.start(cfg, sc, work, sc["app"], port, logpath)
+        cl = attacker.client(f"http://127.0.0.1:{port}")
+        try:
+            try: sandbox.wait_ready(p, f"http://127.0.0.1:{port}", logpath)
+            except RuntimeError as e: raise RuntimeError("candidate " + str(e))
+            yield cl
+        finally: cl.close(); sandbox.kill(p); sandbox.cleanup(work)
+        return
+    src = config.app_path(sc).read_text(encoding="utf-8-sig")
+    (out / f"{name}.py").write_text(patched_source(src, sc, code) if code else src, encoding="utf-8")
     log = open(out / f"{name}.log", "wb")
-    p = subprocess.Popen([sys.executable, "-m", "uvicorn", module, "--port", str(port), "--log-level", "warning"],
-                         cwd=cwd, env=_env(cfg, sc), stdout=log, stderr=log)
+    p = subprocess.Popen([sys.executable, "-m", "uvicorn", f"{name}:app", "--port", str(port), "--log-level", "warning"],
+                         cwd=out, env=_env(cfg, sc), stdout=log, stderr=log)
     cl = attacker.client(f"http://127.0.0.1:{port}")
     try:
         ready = False
@@ -101,14 +105,19 @@ def regression(cl, sc):
     return bad
 
 def regression_custom(cfg, sc, csc, cl):
-    """uploaded apps: everyday behaviour = how the ORIGINAL app behaves one request at a time (statuses and final state)"""
+    """uploaded apps: everyday behaviour = how the ORIGINAL app behaves one request at a time (statuses and every table afterwards).
+    Differential: the original is run twice, and columns that differ between those two identical runs (timestamps, random ids) are ignored."""
     ref_cl = attacker.client(sc["base_url"])
-    try: ref = attacker.sequential_signature(cfg, sc, ref_cl)
+    try: ref, ref2 = attacker.sequential_signature(cfg, sc, ref_cl), attacker.sequential_signature(cfg, sc, ref_cl)
     finally: ref_cl.close()
-    got = attacker.sequential_signature(cfg, csc, cl)
-    if got != ref:
-        return [f"one request at a time, the original returned {ref['statuses']} and ended at {ref['final']}, "
-                f"but the fix returned {got['statuses']} and ended at {got['final']}"]
+    vol = attacker.volatile_columns(ref, ref2); got = attacker.sequential_signature(cfg, csc, cl)
+    if got["statuses"] != ref["statuses"]:
+        return [f"one request at a time, the original returned {ref['statuses']} but the fix returned {got['statuses']}"]
+    a, b = attacker.masked_tables(ref, vol), attacker.masked_tables(got, vol)
+    for t in sorted(set(a) | set(b)):
+        if a.get(t) != b.get(t):
+            return [f"after the same requests one at a time, the table {t} differs: the original left {len(a.get(t, []))} row(s) {a.get(t, [])[:2]}, "
+                    f"the fix left {len(b.get(t, []))} row(s) {b.get(t, [])[:2]}"]
     return []
 
 def app_error_tail(name="candidate_app", n=2):
@@ -127,6 +136,20 @@ def trials(cfg, sc, cl, invariants, k, delay):
             fails += bool(bad); names.update(bad)
     finally: admin.close(); ro.close()
     return fails, sorted(names)
+
+def throughput_custom(cfg, sc, cl, threads=8, per=15):
+    """uploaded projects: requests per second when `threads` clients cycle through the burst's requests (state is reset once first; one quick measurement)"""
+    admin = attacker.connect(cfg, sc=sc)
+    try: attacker.prepare(cl, admin, sc)
+    finally: admin.close()
+    def w(k):
+        for j in range(per):
+            url, query, body, _ = attacker.request_parts(sc, k + j)
+            try: cl.request(sc["endpoint"]["method"], url, params=query, json=body, headers=sc["endpoint"].get("headers") or None)
+            except httpx.HTTPError: pass
+    ts = [threading.Thread(target=w, args=(i,)) for i in range(threads)]; t0 = time.perf_counter()
+    [t.start() for t in ts]; [t.join() for t in ts]
+    return round(threads * per / (time.perf_counter() - t0), 1)
 
 def throughput(sc, cl, threads=16, per=25):
     tp, ep = sc["throughput"], sc["endpoint"]
@@ -154,5 +177,6 @@ def validate_candidate(cfg, sc, code, invariants, k=50, schedule=None):
             f, names = trials(cfg, csc, cl, invariants, k, d)
             rep["fresh_trials"].append({"delay_ms": d, "trials": k, "violations": f, "invariants": names})
             if f: return False, rep, f"Your patch still violates {names} in {f} of {k} fresh trials with a {d} ms pause. The race is not fixed."
-        if sc.get("throughput"): rep["throughput_rps"] = throughput(csc, cl)
+        if sc.get("custom"): rep["throughput_rps"] = throughput_custom(cfg, csc, cl)
+        elif sc.get("throughput"): rep["throughput_rps"] = throughput(csc, cl)
     return True, rep, ""

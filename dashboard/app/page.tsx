@@ -1,52 +1,84 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { listScenarios } from "@/lib/api";
+import { listScenarios, listUploads } from "@/lib/api";
 import { copyFor } from "@/lib/copy";
-import type { Scenario } from "@/lib/types";
+import type { Scenario, UploadSummary } from "@/lib/types";
 import { ErrorBox } from "@/components/ui";
+import UploadBox from "@/components/UploadBox";
 
 export default function Home() {
   const [scenarios, setScenarios] = useState<Scenario[] | null>(null);
+  const [projects, setProjects] = useState<UploadSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => { listScenarios().then(setScenarios).catch((e) => setError((e as Error).message)); }, []);
-  const demos = scenarios?.filter((s) => !s.custom) ?? [], mine = scenarios?.filter((s) => s.custom) ?? [];
-  const card = (s: Scenario) => {
-    const c = copyFor(s.id, s);
-    return (
-      <Link key={s.id} href={`/scenarios/${s.id}`} className="card pick">
-        <h3>{c.title}</h3>
-        <p className="muted" style={{ margin: "4px 0 12px" }}>{c.story}</p>
-        <span className="btn">Start →</span>
-      </Link>
-    );
-  };
+  useEffect(() => {
+    listScenarios().then(setScenarios).catch((e) => setError((e as Error).message));
+    listUploads().then(setProjects).catch(() => setProjects([]));   // only used for the "continue" links: a failure just hides them
+  }, []);
+  const demos = scenarios?.filter((s) => !s.custom) ?? [];
+
   return (
     <>
-      <h1>Does your app break when two people click at the same time?</h1>
-      <p className="lead">
-        Some bugs only appear when two requests arrive at the exact same moment: two withdrawals from one wallet, two shoppers buying the last item.
-        Normal tests never see them. GlitchHunter makes it happen on purpose, shows you what goes wrong, and checks that a fix really works.
-      </p>
-      <div className="three">
-        <div><b>1. See the bug</b><br /><span className="muted">We send requests at the same instant, many times.</span></div>
-        <div><b>2. Know it is wrong</b><br /><span className="muted">Checks tell us when the result makes no sense.</span></div>
-        <div><b>3. Fix it and prove it</b><br /><span className="muted">An AI proposes a fix. We test it before you trust it.</span></div>
-      </div>
-      <h2>Pick an example to try</h2>
-      <ErrorBox message={error} />
-      {!scenarios && !error && <p className="muted">Loading…</p>}
-      <div className="cards">{demos.map(card)}</div>
+      <section className="top">
+        <div>
+          <h1>₹100 in the wallet. ₹160 paid out.</h1>
+          <p>
+            Most read-check-write bugs never show up in tests that send one request at a time. GlitchHunter sends them together to the real database,
+            keeps the run that broke your rules, and only accepts a fix once that exact run comes back clean.
+          </p>
+          <div className="cta">
+            <Link href="/#demos" className="btn lg">Try a demo</Link>
+            <Link href="/#upload" className="btn ghost lg">Use your own code</Link>
+          </div>
+        </div>
+        <p className="note">
+          It reproduces bugs and checks fixes. It does not prove a race is gone: zero violations in a hundred tries is evidence, not proof. Point it at test data, never production.
+        </p>
+      </section>
 
-      <h2 style={{ marginTop: 32 }}>Or try your own app</h2>
-      <div className="cards">
-        <Link href="/try" className="card pick own">
-          <h3>＋ Upload your own FastAPI app</h3>
-          <p className="muted" style={{ margin: "4px 0 12px" }}>Bring a small FastAPI + PostgreSQL app and a setup SQL script. We attack one of its endpoints and test a fix.</p>
-          <span className="btn">Upload an app →</span>
-        </Link>
-        {mine.map(card)}
-      </div>
+      <section className="steps" aria-label="How it works">
+        <div><span className="n">01</span><h3>Break it</h3><p>Send the same requests at the same instant, again and again.</p></div>
+        <div><span className="n">02</span><h3>Know it is wrong</h3><p>Checks that must always hold tell us when the result makes no sense.</p></div>
+        <div><span className="n">03</span><h3>Fix it and prove it</h3><p>An AI proposes a fix; we test it on a copy before you trust it.</p></div>
+      </section>
+
+      <section className="block" id="demos">
+        <span className="label">Try a demo</span>
+        <ErrorBox message={error} />
+        {scenarios === null && !error && <div aria-busy="true"><div className="sk" /><div className="sk" /></div>}
+        {scenarios !== null && (
+          <table className="rows">
+            <thead><tr><th>Scenario</th><th>Endpoint</th><th className="go"><span className="sr">Open</span></th></tr></thead>
+            <tbody>
+              {demos.map((s) => {
+                const c = copyFor(s.id, s);
+                return (
+                  <tr key={s.id}>
+                    <td><div className="t"><Link href={`/scenarios/${s.id}`}>{c.title}</Link></div><div className="d">{c.story}</div></td>
+                    <td className="ep" data-label="Endpoint">{s.endpoint.method} {s.endpoint.path}</td>
+                    <td className="go"><Link href={`/scenarios/${s.id}`} className="btn">Run this demo</Link></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </section>
+
+      <section className="block" id="upload">
+        <span className="label">Use your own code</span>
+        <UploadBox />
+        {projects.length > 0 && (
+          <p className="recent">
+            <span>Continue with:</span>
+            {projects.slice(0, 4).map((p) => (
+              <span key={p.id}><Link href={p.status === "set up" ? `/scenarios/${p.id}` : `/project?id=${p.id}`}>{p.name}</Link><span className={`badge ${p.status === "set up" ? "ok" : "warn"}`}>{p.status}</span></span>
+            ))}
+          </p>
+        )}
+      </section>
+
+      <footer className="foot">GlitchHunter reproduces and validates concurrency bugs. A passing fix is evidence, not proof.</footer>
     </>
   );
 }

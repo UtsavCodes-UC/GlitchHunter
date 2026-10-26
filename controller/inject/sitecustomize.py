@@ -36,6 +36,28 @@ if _ms > 0:
             return _orig_connect(*args, **kwargs)
 
         psycopg2.connect = _connect
+
+        # Many apps pass cursor_factory=RealDictCursor (or DictCursor / NamedTupleCursor) to conn.cursor(), which bypasses the
+        # connection default above. Those classes are written in Python, so wrap their execute() as well.
+        try:
+            import psycopg2.extras as _extras
+
+            def _wrap(cls):
+                orig = cls.execute
+
+                def execute(self, query, vars=None):
+                    result = orig(self, query, vars)
+                    if _is_select(query):
+                        time.sleep(_ms / 1000)
+                    return result
+
+                cls.execute = execute
+
+            for _name in ("DictCursor", "RealDictCursor", "NamedTupleCursor"):
+                if hasattr(_extras, _name):
+                    _wrap(getattr(_extras, _name))
+        except ImportError:
+            pass
     except ImportError:
         pass
 

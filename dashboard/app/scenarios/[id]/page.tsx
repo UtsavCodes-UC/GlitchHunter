@@ -127,8 +127,8 @@ export default function ScenarioPage() {
   const a = sc.attack, r = sc.repair, t = a?.first_failing_trial ?? null;
 
   return (
-    <>
-      <p><Link href="/">← All examples</Link></p>
+    <div className="narrow">
+      <p>{custom ? <Link href={`/project?id=${id}`}>← Back to the project setup</Link> : <Link href="/">← All examples</Link>}</p>
       <h1>{copy.title}</h1>
       <p className="lead">{copy.story}</p>
       <ErrorBox message={error ?? sc.loadError} />
@@ -139,7 +139,7 @@ export default function ScenarioPage() {
           <h2>See the bug</h2>
           <p className="muted">We send the requests at the same instant, 50 times, and look at what happens.</p>
           {custom && <div className="notice-box" style={{ margin: "8px 0 12px" }}>
-            Your own app: <b>start with step 2</b>. GlitchHunter cannot know what “correct” means for your data, so the AI suggests checks and you choose which ones to use. Then come back here.
+            Your own code: <b>start with step 2</b>. GlitchHunter cannot know what “correct” means for your data, so the AI suggests checks and you choose which ones to use. Then come back here.
             To make timing problems easier to catch, we slow down your app&apos;s database reads slightly in our test copy; your files are never changed.
           </div>}
           <button disabled={busy !== null || (custom && selected === 0)} onClick={() => run("attack", async () => { sc.setAttack(await runAttack(id, { trials: 50, delay_ms: 0 })); })}>
@@ -206,6 +206,6 @@ export default function ScenarioPage() {
           {r && <div style={{ marginTop: 16 }}><FixResult attempts={r.attempts} accepted={r.accepted} control={r.negative_control} custom={custom} /></div>}
         </div>
       </section>
-    </>
+    </div>
   );
 }

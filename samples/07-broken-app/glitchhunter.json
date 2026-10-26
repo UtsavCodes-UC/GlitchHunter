@@ -1,0 +1,20 @@
+{
+  "app": "main:app",
+  "file": "api/main.py",
+  "func": "buy",
+  "method": "POST",
+  "path": "/buy",
+  "body": "query",
+  "burst": [
+    {
+      "qty": 1
+    },
+    {
+      "qty": 1
+    }
+  ],
+  "schema_sql": "CREATE TABLE t (id int);",
+  "seed_sql": "",
+  "db_env": "DATABASE_URL",
+  "env": {}
+}

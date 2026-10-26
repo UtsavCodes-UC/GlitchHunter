@@ -1,0 +1,26 @@
+{
+  "app": "likes:app",
+  "file": "likes.py",
+  "func": "like",
+  "method": "POST",
+  "path": "/posts/{post_id}/like",
+  "body": "query",
+  "burst": [
+    {
+      "post_id": 1
+    },
+    {
+      "post_id": 1
+    },
+    {
+      "post_id": 1
+    },
+    {
+      "post_id": 1
+    }
+  ],
+  "schema_sql": "CREATE TABLE posts (id int PRIMARY KEY, likes int NOT NULL);",
+  "seed_sql": "INSERT INTO posts VALUES (1, 0);",
+  "db_env": "DATABASE_URL",
+  "env": {}
+}

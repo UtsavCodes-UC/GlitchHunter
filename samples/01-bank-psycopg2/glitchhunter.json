@@ -1,0 +1,26 @@
+{
+  "app": "app.main:app",
+  "file": "app/main.py",
+  "func": "withdraw",
+  "method": "POST",
+  "path": "/withdraw",
+  "body": "json",
+  "burst": [
+    {
+      "account_id": 1,
+      "amount": 80
+    },
+    {
+      "account_id": 1,
+      "amount": 80
+    },
+    {
+      "account_id": 1,
+      "amount": 80
+    }
+  ],
+  "schema_sql": "CREATE TABLE accounts (id int PRIMARY KEY, balance int NOT NULL);",
+  "seed_sql": "INSERT INTO accounts VALUES (1, 100);",
+  "db_env": "DATABASE_URL",
+  "env": {}
+}

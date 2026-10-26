@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "glitchhunter"
+version = "0.1.0"
+description = "Reproduces concurrency bugs in FastAPI + PostgreSQL apps and checks AI-proposed fixes by rerunning the failing run."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "fastapi", "uvicorn", "httpx", "pyyaml", "python-multipart", "pydantic",
+  "psycopg2-binary", "psycopg[binary]", "sqlalchemy", "asyncpg",
+]
+
+[project.scripts]
+glitchhunter = "cli.main:main"
+
+[tool.setuptools]
+packages = ["cli", "controller", "controller.inject", "orchestrator"]
+
+[tool.setuptools.package-data]
+orchestrator = ["prompts/*.txt"]

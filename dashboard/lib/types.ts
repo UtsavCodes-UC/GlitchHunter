@@ -40,6 +40,8 @@ export interface TrialResult {
   initial_state: Record<string, number | null>;
   requests: RequestRecord[];
   final_state: Record<string, number | null>;
+  initial_tables?: Record<string, unknown[]>;   // uploaded projects: every table before and after the try
+  final_tables?: Record<string, unknown[]>;
   violations: Record<string, unknown[][] | null>;
 }
 
@@ -48,44 +50,77 @@ export interface Scenario {
   title?: string | null;     // set for uploaded apps
   custom?: boolean;          // true for uploaded apps ("Try your own app")
   race_n?: number | null;    // simultaneous requests per try
-  qty_key?: string | null;   // uploaded apps: which request value is "how much each request takes"
+  burst?: Record<string, unknown>[] | null;   // uploaded projects: the requests sent together in one try
   endpoint: { method: string; path: string; params: Record<string, number | string>; path_params?: Record<string, unknown>; json?: unknown; header_names?: string[] };
   invariants: number;
+  rules_approved?: number;   // checks a person approved
+  failing_runs?: number;     // failing tries found in saved attacks on this machine
+  fixes_accepted?: number;   // accepted fixes in saved repairs on this machine
 }
 
-export interface ProjectEndpoint {
+export type Verdict = "suspect" | "guarded" | "writes" | "read-only";
+
+export interface ScanRoute {
   method: string;
-  path: string;               // full path as served, prefixes included
+  path: string;               // full path with router prefixes
   function: string;
   file: string;
   lineno: number;
   is_async: boolean;
-  supported: boolean;
-  unsupported_reasons: string[];
-  notes: string[];
-  auth: { kind: string; header: string; prefix: string } | null;
-  required_headers: Record<string, string>;
-  sample_params: Record<string, unknown>;       // query values
-  sample_path_params: Record<string, unknown>;
-  sample_json: unknown;                          // sample JSON body built from the schema, or null
-  qty_candidates: string[];
-  suggested_qty: string | null;
-  hint: string;
+  app: string | null;         // "pkg.module:attr" of the app that serves it
+  verdict: Verdict;           // a hint from code patterns, never a proof
+  reasons: string[];
+  path_params: string[];
+  body: Record<string, unknown> | null;
+  query: Record<string, unknown>;
+  sample: Record<string, unknown>;
 }
 
-export interface Project {
+export interface Setup {
+  app: string;
+  file: string;
+  func: string;
+  method: string;
+  path: string;
+  body: "json" | "query";
+  burst: Record<string, unknown>[];
+  schema_sql: string;
+  seed_sql: string;
+  db_env: string;
+  env: Record<string, string>;
+  headers?: Record<string, string>;
+  db_scheme?: string;
+  pause_ms?: number;
+}
+
+export interface UploadSummary {
   id: string;
   name: string;
-  filename: string;
-  tables: string[];
-  columns: Record<string, { name: string; type: string }[]>;
-  db_env: string;
-  db_scheme: string;
-  env_names: string[];
-  entry: { file: string; module: string; var: string };
-  endpoints: ProjectEndpoint[];
-  suggested_state: { table: string; column: string } | null;
-  warnings: string[];
+  created: number;
+  endpoints: number;
+  risky: number;
+  status: "needs setup" | "set up";
+  files: string[];
+  skipped: number;
+  config: Setup | null;
+}
+
+export interface UploadDetail extends UploadSummary {
+  scan: {
+    apps: { spec: string; file: string; routes: number }[];
+    routes: ScanRoute[];
+    db_env: { guess: string; found: string[]; env: Record<string, string> };
+    schema_sql: string; seed_sql: string; schema_source: string | null;
+    warnings: string[]; py_files: number; risky: number;
+  };
+  suggested: Setup | null;
+}
+
+export interface Job {
+  id: string;
+  status: "running" | "done" | "error";
+  log: { t: number; msg: string }[];
+  result: { verdict: "ok" | "warning" | "server error" | "setup error"; message: string; statuses?: number[]; initial_tables?: Record<string, unknown[]>; final_tables?: Record<string, unknown[]> } | null;
 }
 
 export interface AttackSummary {

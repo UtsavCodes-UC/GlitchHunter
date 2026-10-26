@@ -1,49 +1,50 @@
-# Try your own app (upload a third-party app)
+# Your own code (upload a FastAPI + PostgreSQL project)
 
-Upload a FastAPI + PostgreSQL app and GlitchHunter starts it, finds its endpoints, attacks one with simultaneous requests, shows what goes wrong, and tests an AI-proposed fix. Dashboard: `/try`. CLI: `.\glitchhunter upload ...` (see `docs/cli.md`). Needs live mode (`NEXT_PUBLIC_USE_MOCK=false`).
+Drop a `.zip`, some files or a whole folder on the home page. GlitchHunter **reads** it (nothing is run), shows the endpoints with a hint per endpoint,
+asks for a short setup, runs the app **once** in isolation to test that setup, and from then on the project goes through the same pages as the built-in examples
+(checks, attack, repair). CLI: `.\glitchhunter upload PATH`, `setup ID`, `delete-project ID` (see `docs/cli.md`). Needs live mode (`NEXT_PUBLIC_USE_MOCK=false`).
 
-## Preparing a real app: checklist
-1. **Pick the endpoint**: one that reads a value and then writes it (stock, balance, quota, counter, "claim a coupon"). The scan ranks "reads, then writes" endpoints first.
-2. **Install its Python packages here**: `pip install -r requirements.txt` in the environment that runs GlitchHunter. There is no isolation: the app runs with whatever is installed. If a package is missing the upload says which one.
-3. **Zip the app folder** (without `venv`, `.git`, `node_modules`; limit 2 MB / 300 files), or upload a single `.py` if it is self-contained. Package layouts (`app/main.py` with relative imports, routers, services) work as a zip.
-4. **Setup SQL**: statements that reset the tables the endpoint touches and insert a few starting rows. Easiest: run the app's migrations on a scratch database, `pg_dump --schema-only`, then add `INSERT` rows. If your app creates its own tables on start-up, use `TRUNCATE ... RESTART IDENTITY; INSERT ...` instead: the app is started once before the SQL runs. Keep it to the tables that matter (limit 30).
-5. **Database address**: the app must read it from an environment variable (default `DATABASE_URL`). SQLAlchemy apps often need the URL style `postgresql+psycopg2://` (SQLAlchemy 2.1 picks the psycopg3 driver for a plain `postgresql://`).
-6. **Extra environment variables** the app needs (`API_TOKEN`, `SECRET_KEY`, ...): `NAME=value`, one per line. Stored on this computer in `runs/projects/` (git-ignored). Use test values.
-7. **Login**: if the endpoint needs a token or API key, enter a test value that the app accepts as the header value (for example `Bearer test-token`). One static header is supported.
+## Needs (once): permission to create database roles
+Each project gets its own PostgreSQL role and schema. The database user in `GH_DATABASE_URL` (or `GH_ADMIN_DATABASE_URL` if you set it) must be allowed to create roles. As a superuser (in psql as `postgres`):
+```sql
+ALTER ROLE rh CREATEROLE;
+```
+Without it the first "Save and test" fails with exactly this instruction. Nothing is created in the database before that point.
 
-## What it understands (and how)
-GlitchHunter **imports your app in a subprocess and asks FastAPI what it serves** (`controller/inject/inspect_app.py`), so it does not guess from source files:
-- **Routers and prefixes**: full paths such as `/api/v1/orders` are exact, including nested `include_router(..., prefix=...)`.
-- **JSON bodies**: a sample body is built from the OpenAPI schema (required fields, enums, formats, min/max); you can edit it. Path values and query values likewise.
-- **Auth**: security schemes and required `Authorization` / API-key headers are detected and asked for.
-- **Source location**: each route's handler file and line come from the running app, so the AI reads the right function and a fix replaces exactly that function (decorators must stay the same).
-- **Related code**: the helper functions the handler calls (up to two levels) and the model classes it uses are shown to the AI, because the real logic often lives in a service module.
-- **Number to watch**: the numeric column the code assigns or decrements (for example `products.stock`) is suggested from the real schema; you can change it. The "quantity" field is guessed from the request values.
-- **Unsupported flags**: endpoints that need a form or file upload, a cookie login, or whose code lives in an installed library are listed with the reason and cannot be selected.
+## The flow
+1. **Upload.** Limits (change with environment variables): zip 3 MB (`GH_UPLOAD_ZIP_MAX`), one file 1 MB (`GH_UPLOAD_FILE_MAX`), 10 MB in total (`GH_UPLOAD_TOTAL_MAX`), 400 files (`GH_UPLOAD_MAX_FILES`), 25 projects (`GH_UPLOAD_MAX_PROJECTS`). Only text/source files are kept (`.py .txt .md .sql .json .yaml .yml .toml .cfg .ini .html .csv .rst`); `venv`, `.git`, `node_modules`, `__pycache__`, hidden folders and dotfiles are skipped. Refused: absolute paths, `..`, symlinks in a zip, files that are not UTF-8, uploads without a `.py` file. A single top folder is stripped. The project name defaults to the zip or folder name.
+2. **Static scan** (`orchestrator/scan.py`; `ast` and regular expressions only, **never imports or runs your code**): FastAPI apps and routers with their `include_router` prefixes, every route with its path/query/body fields, a **hint** per route, a guess of the environment variable for the database address, and a guess of the schema SQL (from `.sql` files, `CREATE TABLE` text in code, or SQLAlchemy models) and of seed rows.
+   - `looks risky`: reads data, then writes it back, with no lock or atomic UPDATE in sight. `guarded`: uses `SELECT ... FOR UPDATE`, an advisory lock, `ON CONFLICT`, an atomic conditional `UPDATE`, or a strict isolation level. `writes`: writes without reading first. `read-only`.
+   - These are **hints from code patterns, not verdicts**. A guarded-looking route can still be wrong and a risky-looking one can be fine.
+3. **Setup** (pre-filled): how to start the app (`pkg.module:attr`), the file and function of the endpoint, method, path with `{placeholders}`, whether other values go in a JSON body or the query string, the **burst** (2 to 50 JSON objects, one per request; they may differ), schema SQL, seed SQL, the environment variable for the database address, extra environment variables (`${PGHOST}`, `${PGPORT}`, `${PGUSER}`, `${PGPASSWORD}`, `${PGDATABASE}`, `${DB_URL}` expand to this project's private database, so no password is typed), an optional login header, the URL style (`postgresql+psycopg2` for SQLAlchemy 2.1) and the test pause.
+4. **Save and test the setup**: creates the role and schema, runs the schema SQL, starts the app in isolation, loads the seed rows, sends the burst once and reports honestly: any 5xx is a **server error** (with the app's last output); no 2xx or any 422 is a **warning** (requests rejected); otherwise **ok**. A live log is shown. Only then does the project become a scenario (`set up`).
+5. **Edit or delete.** Editing the setup removes the old test result until it is tested again. Delete stops the app, terminates the role's sessions, drops the schema and the role, and removes the files, checks and results.
 
-## How the attack and the checks work
-- **Isolation**: each project gets its own PostgreSQL schema `p_<id>`; the app, the setup SQL, the attacker and the checks all use it as `search_path`. Deleting the project drops it.
-- **Snapshots**: before each try every table `T` is copied to `snap_T`; checks relate `snap_T`, the request log `ops_log` (all request values in `params` jsonb, and the HTTP `status`; any 2xx counts as success) and the final tables.
-- **Checks**: the AI proposes them from the endpoint, its helpers and the live schema. There is **no built-in check** for uploaded apps, so a person approves at least one. The filter drops checks that fire on one-at-a-time runs and marks checks that never fire under concurrency as uninformative. Recall is not measured.
-- **Making the race visible**: the test copy starts with `controller/inject/sitecustomize.py` on `PYTHONPATH` and `GH_RACE_PAUSE_MS` (default 25): every `SELECT` sleeps afterwards, through **psycopg2** and through **synchronous SQLAlchemy** engines (an `after_cursor_execute` listener). This widens the read-check-write gap in the test copy only. Without it a race was rare (1 of 50 tries); with it 48 to 50 of 50.
-- **Repair**: the prompt shows the handler, the whole file (so it knows which names exist), and the related code. The fix may add imports **inside the function** from fastapi, sqlalchemy, pydantic, typing, datetime, decimal, uuid, math or the project's own modules (never os, sys, subprocess). It runs on a **copy of the whole project folder** and is accepted only if (a) one-request-at-a-time behaviour matches the **original app** (statuses and final value), (b) the failing schedule replays clean, (c) two batches of fresh simultaneous tries show no violation. The original code goes through the same validation as a negative control. If a fix fails, the app's own error output is sent back to the AI. Uploaded files are never edited; the fix is shown as code to copy.
+## What runs when
+- Upload, scan, saving a setup, showing source: your code is only read.
+- Setup test, attack, repair validation: your code runs, on a **fresh temporary copy** of the files, as a separate process (own process group), with a **minimal environment** (a short allow-list such as `PATH`, `SYSTEMROOT`, `TEMP`, plus the project's own database variables and the extra variables you gave). None of our API keys, the main database URL or other settings are passed on. `requirements.txt` is never installed: the libraries available are the ones installed for GlitchHunter itself (fastapi, pydantic, psycopg2, psycopg 3, sqlalchemy, asyncpg, httpx).
 
-## What was tested
-1. A small psycopg2 app (ticket shop): upload, checks, attack (50 of 50), repair accepted, control rejected the original.
-2. A stand-in "third-party style" app **written by us**: package layout, SQLAlchemy ORM, a helper in a services module, routers with a nested prefix (`/api/v1/orders`), a Pydantic JSON body, a required `Authorization` header, settings that need an extra environment variable, `201` responses. Through the dashboard: scan found the nested path, the body sample, the auth header and the classic pattern; the AI proposed checks (the filter dropped one wrong check); the attack failed 50 of 50 (stock 3, six orders approved); repair was accepted with a different approach than the demo apps (a raw `SELECT ... FOR UPDATE` before the helper, with an import inside the function) and the control rejected the original. Its first repair attempt failed because the AI used a name the file did not import: the validator rejected it, which led to the import rule and the better error feedback above.
-**No real third-party app from the internet has been tried.** Two stand-ins are not evidence of generality.
+## Isolation: what is and is not isolated
+- **Database (isolated):** one role `gh_up_<id>` and one schema `up_<id>` per project (`NOSUPERUSER NOCREATEDB NOCREATEROLE`, 80 connections, statement and idle-in-transaction timeouts). The role owns only its schema. Verified with `python samples/isolation_probe.py`: it could not read another table of the main database or another project's schema, and could not create a schema, a role, or a table in `public`; `pg_read_file`, `pg_shadow`, `SET ROLE` and `COPY ... TO PROGRAM` were all denied, and it saw no API key or main database URL in its environment. (It can still see catalog names, such as table names, that PostgreSQL shows to every role.)
+- **Process (partly isolated):** fresh temp copy, minimal environment, own process group. On Linux/macOS also resource limits (CPU, memory, file size, open files, core dumps) and, when GlitchHunter runs as root, a switch to an unprivileged user. **These POSIX parts were written but NOT run on this Windows machine** (no Docker/WSL here); on Windows only the copy, the minimal environment and the process group apply.
+- **NOT isolated:** outbound network access (the uploaded app can reach any host the machine can), CPU/memory on Windows, the Python packages (shared), the files the Windows user can read. **Only upload code you trust, and never expose this API publicly.** The orchestrator itself is not authenticated.
+- The role passwords are stored in `runs/projects/<id>/` (git-ignored, local only).
+
+## How the checks and the repair work
+- Before every try the app's tables are truncated (`RESTART IDENTITY CASCADE`), the seed SQL runs, every table `T` is copied to `initial_T`, and `ops_log` (one row per request: `endpoint` with a leading slash, `params` jsonb with all values, `status`) is recreated. Checks relate `initial_T`, `ops_log` and the final tables; the state shown in the dashboard is every table before and after, as JSON.
+- Checks come from the AI and a **person approves** them; there is no built-in check. The filter drops checks that fire on one-at-a-time runs and marks checks that never fire as uninformative. Recall is not measured.
+- **Making the race visible:** the test copy loads `controller/inject/sitecustomize.py`, which sleeps after each `SELECT` through psycopg2 (including dict cursors) and synchronous SQLAlchemy. Async drivers (asyncpg, psycopg 3, async SQLAlchemy) are not covered, but the async sample still races because awaits interleave.
+- **Repair** replaces the endpoint function (decorators kept) in a copy of the project; accepted only if (a) behaviour one request at a time matches the **original** (statuses of the burst and every table afterwards, ignoring columns that differ between two identical runs of the original, such as timestamps), (b) the failing schedule replays clean, (c) two batches of fresh simultaneous tries show no violation. The original goes through the same validation as a negative control. Uploaded files are never edited; the fix is shown as code to copy.
 
 ## Limits
-- FastAPI + PostgreSQL. psycopg2 or **synchronous** SQLAlchemy. **Async drivers** (asyncpg, SQLAlchemy async, psycopg3 async) are not covered by the pause: a race may be rare (the upload warns when it sees them).
-- No form or file bodies, no cookie logins, no token refresh or login flows (one static header only), no WebSockets.
-- One endpoint per scenario; the "number to watch" is one column (summed over the table).
-- A fix replaces one function. A bug whose proper fix is in another file (a service, a model constraint, a migration) can only be fixed if the AI can do it inside the handler (for example by locking the row first). Constraint-based fixes (unique indexes) are not applied.
-- Dependencies are not isolated and Python-version conflicts are not handled.
-- **The uploaded code is run on this machine** (to inspect it, to attack it, and the AI-written patch runs on a copy). API keys are removed from its environment, but there is no sandbox. Only upload code you trust and never expose the API publicly with this feature on.
-- A fix is only as good as the approved checks. "Passed" is evidence, not proof.
+- FastAPI + PostgreSQL; JSON, query and path values; one static header. No form/file bodies, cookie logins, WebSockets or token refresh.
+- The static scan resolves names by simple rules; dynamic routing, `mount()` and generated routers are not understood (type the app and function by hand).
+- One endpoint per setup. A fix replaces one function: a bug whose proper fix lives in another file can only be fixed if the AI can do it inside the handler.
+- The schema and seed guesses are best-effort (SQLAlchemy models only; no SQLModel, no migrations). A seed with a small stock (such as 1) makes the race easy to hit.
+- "Passed" is evidence, not proof.
 
-## API
-- `POST /projects` `{name, filename, content_b64, setup_sql, db_env, db_scheme, env}` returns the project (`id`, `tables`, `columns`, `entry`, `endpoints[...]`, `suggested_state`, `warnings`, `env_names`). Environment values are never returned. Errors: 422 with a plain message.
-- `POST /projects/{id}/scenario` `{method, path, params, path_params, json, headers, race_n, state, qty_key, pause_ms}` creates scenario `custom_<id>`; it then appears in `GET /scenarios` (header **values** are never returned, only `header_names`).
-- `GET /projects`, `DELETE /projects/{id}` (stops the app, drops the schema, removes the files).
-- Files live under `runs/projects/<id>/` (git-ignored). `GH_CORS_ORIGINS` (comma list) allows more dashboard origins.
+## Samples and verification
+`samples/` holds seven projects each with a `SETUP.md` (what to click and which values to enter); `python samples/verify.py` drives them through the real API (upload, scan, setup, test, a hand-written check, attack, delete) and `python samples/isolation_probe.py` runs the isolation probes. Recorded results are in `samples/RESULTS.md`.
+
+## API (replaces the earlier `/projects` routes)
+`POST /api/uploads` (multipart: `files`, optional `name`), `GET /api/uploads`, `GET /api/uploads/{id}`, `GET /api/uploads/{id}/source?path=&fn=`, `PUT /api/uploads/{id}/config`, `POST /api/uploads/{id}/check` (returns a job), `GET /api/uploads/{id}/jobs/{job}` (status, live log, result), `DELETE /api/uploads/{id}`. The project id is also the scenario id once set up (`/scenarios/{id}/...`).

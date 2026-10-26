@@ -1,0 +1,26 @@
+{
+  "app": "server:app",
+  "file": "server.py",
+  "func": "redeem",
+  "method": "POST",
+  "path": "/giftcards/{code}/redeem",
+  "body": "json",
+  "burst": [
+    {
+      "code": "GIFT50",
+      "amount": 30
+    },
+    {
+      "code": "GIFT50",
+      "amount": 30
+    },
+    {
+      "code": "GIFT50",
+      "amount": 30
+    }
+  ],
+  "schema_sql": "",
+  "seed_sql": "INSERT INTO giftcards VALUES ('GIFT50', 50);",
+  "db_env": "DB_URL",
+  "env": {}
+}
