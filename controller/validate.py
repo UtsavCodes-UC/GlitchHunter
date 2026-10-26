@@ -23,9 +23,30 @@ def region(src, ep):
     n = re.search(r"^@\w+\.(get|post|put|patch|delete)\(", src[start + 1:], re.M)
     return start, (start + 1 + n.start()) if n else len(src)
 
-def patched_source(src, ep, code):
-    a, b = region(src, ep)
-    return src[:a] + code.strip() + "\n\n" + src[b:]
+def region_func(src, func):
+    """(start, end) offsets of a handler found by file position (uploaded apps): its first decorator line .. the end of its last line"""
+    import ast
+    tree = ast.parse(src); lines = src.splitlines(keepends=True)
+    for n in ast.walk(tree):
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == func["name"]:
+            first = min([d.lineno for d in n.decorator_list] + [n.lineno])
+            if abs(first - func["lineno"]) <= 1 or n.lineno == func["lineno"]:
+                return sum(map(len, lines[:first - 1])), sum(map(len, lines[:n.end_lineno]))
+    raise ValueError(f"could not find the function {func['name']} in the file (was it changed after upload?)")
+
+def endpoint_region(src, sc):
+    return region_func(src, sc["func"]) if sc.get("func") else region(src, sc["endpoint"])
+
+def patched_source(src, sc, code):
+    a, b = endpoint_region(src, sc)
+    return src[:a] + code.strip("\n") + ("\n" if sc.get("func") else "\n\n") + src[b:]
+
+def same_decorators(sc, code):
+    """a fix for an uploaded app must keep the handler's decorators (they define its route and its dependencies)"""
+    import ast
+    src = config.app_path(sc).read_text(encoding="utf-8"); a, b = endpoint_region(src, sc)
+    orig = ast.parse(src[a:b]).body[0]; new = ast.parse(code).body[0]
+    return [ast.unparse(d) for d in orig.decorator_list] == [ast.unparse(d) for d in new.decorator_list]
 
 def _env(cfg, sc):
     env = config.test_env(os.environ, sc, cfg); env["MODE"] = "vuln"
@@ -39,11 +60,11 @@ def server(sc, code=None, name="candidate_app", cfg=None):
         src_dir = pathlib.Path(sc["project_dir"]); work = out / sc["project_id"]
         shutil.rmtree(work, ignore_errors=True); shutil.copytree(src_dir, work)
         target = work / pathlib.Path(sc["app_file"]).relative_to(src_dir); text = target.read_text(encoding="utf-8")
-        if code: target.write_text(patched_source(text, sc["endpoint"], code), encoding="utf-8")
+        if code: target.write_text(patched_source(text, sc, code), encoding="utf-8")
         cwd, module = work, f"{sc['entry']['module']}:{sc['entry']['var']}"
     else:
         src = config.app_path(sc).read_text(encoding="utf-8")
-        (out / f"{name}.py").write_text(patched_source(src, sc["endpoint"], code) if code else src, encoding="utf-8")
+        (out / f"{name}.py").write_text(patched_source(src, sc, code) if code else src, encoding="utf-8")
         cwd, module = out, f"{name}:app"
     port = sc["candidate_port"]
     log = open(out / f"{name}.log", "wb")
@@ -55,7 +76,7 @@ def server(sc, code=None, name="candidate_app", cfg=None):
         for _ in range(80):
             if p.poll() is not None: break
             try:
-                if cl.get("/openapi.json").status_code == 200: ready = True; break
+                cl.get("/openapi.json"); ready = True; break   # any HTTP answer (even 404 when docs are switched off) means it is up
             except httpx.HTTPError: time.sleep(0.25)
         if not ready:
             log.flush(); tail = (out / f"{name}.log").read_text(errors="replace").strip().splitlines()[-6:]
@@ -90,6 +111,13 @@ def regression_custom(cfg, sc, csc, cl):
                 f"but the fix returned {got['statuses']} and ended at {got['final']}"]
     return []
 
+def app_error_tail(name="candidate_app", n=2):
+    """the last error lines the test copy of the app printed (for example a NameError behind an HTTP 500): the AI needs the cause, not just 'it returned 500'"""
+    try: lines = (config.ROOT / "runs" / "repair" / f"{name}.log").read_text(errors="replace").splitlines()
+    except OSError: return ""
+    errs = [l.strip() for l in lines if re.search(r"\b\w*(Error|Exception)\b", l) and not l.strip().startswith(("File ", "raise ", "During"))]
+    return " | ".join(errs[-n:])[:400]
+
 def trials(cfg, sc, cl, invariants, k, delay):
     """k fresh barrier trials on the candidate; returns (trials_with_violation, names of violated invariants)"""
     admin, ro = attacker.connect(cfg, sc=sc), attacker.connect(cfg, True, sc); fails, names = 0, set()
@@ -116,7 +144,8 @@ def validate_candidate(cfg, sc, code, invariants, k=50, schedule=None):
     with server(sc, code, cfg=cfg) as cl:
         rep["regression_failures"] = regression_custom(cfg, sc, csc, cl) if sc.get("custom") else regression(cl, csc)
         if rep["regression_failures"]:
-            return False, rep, "Sequential regression tests failed: " + "; ".join(rep["regression_failures"])
+            hint = app_error_tail()
+            return False, rep, "Sequential regression tests failed: " + "; ".join(rep["regression_failures"]) + (f" The test copy of the app printed this error: {hint}" if hint else "")
         f, names = trials(cfg, csc, cl, invariants, 1, schedule["delay_ms"])
         rep["replay"] = {"trials": 1, "violations": f, "invariants": names}
         if f: return False, rep, f"Replaying the original failing schedule still violates {names}. The race is not fixed."

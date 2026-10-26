@@ -10,6 +10,17 @@ Needs `GH_DATABASE_URL` (for example `postgresql://rh:rh@localhost:5432/rh`). Th
 
 If the ✔ / ✖ symbols look garbled (for example when you redirect output to a file in Windows PowerShell 5.1), set `GH_ASCII=1` for plain `[ok]` / `[x]`.
 
+## Running the demo in two terminals
+| Terminal | Command | What it starts |
+|---|---|---|
+| 1 | `.\glitchhunter serve` | buggy wallet (8000), inventory (8001), fixed wallet (8010, for the red/green test), and the API (9000), all in one window. Waits until each answers, prints the addresses, `Ctrl+C` stops all of them. Logs: `runs\logs\` |
+| 2 | `.\glitchhunter ui` | the dashboard at http://localhost:3000. Production build (steadier for a demo), rebuilt only when the source or `dashboard\.env.local` changed. `--dev` gives hot reload instead |
+
+- `serve` refuses to start if one of its ports is already used (it lists what holds it); add `--restart` to stop those leftovers first. It only stops processes that look like our servers (`uvicorn`, `next`, `node`) and leaves anything else alone.
+- `.\glitchhunter stop` stops leftovers (and the test copies of uploaded apps); `stop --all` also stops the dashboard. Use it if a window was closed abruptly.
+- `serve` does not start PostgreSQL or Ollama. Set `GEMINI_API_KEY` in terminal 1 (after `setx`, open a fresh terminal). `GH_DATABASE_URL` defaults to the local `rh` database.
+- Options: `serve --no-fixed`, `serve --no-inventory`, `ui --restart`, `ui --rebuild`.
+
 ## Exit codes (so it can gate CI)
 - `0` fine: no bug found / fix accepted / test passed
 - `1` a bug was found, or the fix was not accepted, or the replayed problem happened again
@@ -25,7 +36,7 @@ If the ✔ / ✖ symbols look garbled (for example when you redirect output to a
 | `repair SCENARIO [--k 50] [--attempts 3] [--code]` | the AI writes a fix, tested on a copy of the app; saves the accepted function under `runs/patches/`; **exit 0 only if accepted** |
 | `replay FILE.json [--trials 20]` | re-runs a saved failing schedule (written by `scan` under `runs/<run_id>/`) |
 | `test SCENARIO` | writes a regression test from a failing run to `tests/generated/` (demo scenarios) |
-| `upload --name N --app FILE --sql FILE [--env DATABASE_URL] [--endpoint "POST /book"] [--params JSON] [-n 6] [--state table.column]` | adds your own FastAPI + PostgreSQL app as scenario `custom_<id>` (limits: `docs/try_your_own_app.md`) |
+| `upload --name N --app FILE --sql FILE [--env-var NAME=value ...] [--db-scheme postgresql+psycopg2] [--header 'Authorization: Bearer x'] [--endpoint "POST /api/v1/orders"] [--body JSON] [--params JSON] [--path-params JSON] [--qty-key quantity] [-n 6] [--state table.column]` | adds your own FastAPI + PostgreSQL app as scenario `custom_<id>`. It starts the app once to read its routes, prints them with flags, and picks the best candidate unless you name one. Body, number to watch and quantity field are guessed when omitted (checklist and limits: `docs/try_your_own_app.md`) |
 | `delete-project ID` | removes an uploaded app, its files and its database schema |
 | `demo SCENARIO [--no-decoys]` | the whole loop in one go (propose, filter, approve, attack, repair, control) |
 
@@ -47,7 +58,11 @@ Start the target app first (see `apps/README.md`, for example the vulnerable wal
 .\glitchhunter scan custom_ticket_shop_xxxx
 .\glitchhunter repair custom_ticket_shop_xxxx
 ```
-The app is started for you (with a private database schema); you do not run it yourself. `upload` prints the exact scenario id.
+A package-style app with routers, a JSON body and a login token (zip the folder, add its settings):
+```powershell
+.\glitchhunter upload --name "Shop" --app shop.zip --sql setup.sql --db-scheme postgresql+psycopg2 --env-var API_TOKEN=test-token --header "Authorization: Bearer test-token"
+```
+The app is started for you (with a private database schema); you do not run it yourself. `upload` prints the exact scenario id and every endpoint it found, with the reason for any it cannot use. If the app needs a header or setting you did not give, the upload is rolled back and says what is missing.
 
 ## In CI (idea, not set up here)
 `scan` exits 1 when it finds a violation, so a pipeline step such as `.\glitchhunter scan wallet --trials 100` fails the build when a change introduces a race. This needs a throwaway PostgreSQL and the app started in the pipeline, and it needs at least one approved check stored for the scenario.

@@ -43,6 +43,7 @@ a.pick:hover { border-color: var(--accent); }
 .field.narrow { flex: 1 1 150px; margin: 8px 0; }
 .field input[type="text"], .field input[type="number"], .field textarea { font: inherit; font-weight: 400; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; width: 100%; }
 .field textarea { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 0.85rem; }
+.field select { font: inherit; font-weight: 400; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; width: 100%; }
 .choice { display: flex; gap: 10px; align-items: flex-start; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 8px 0; background: var(--panel); cursor: pointer; }
 .choice.on { border-color: var(--accent); }
 .choice.off { opacity: 0.5; cursor: not-allowed; }

@@ -35,7 +35,10 @@ def test_env(base_env, sc, cfg=None):
     """environment for a test copy of an uploaded app: no API keys, the project's schema as search_path, and the SELECT pause"""
     env = {k: v for k, v in base_env.items() if "API_KEY" not in k.upper()}
     if sc.get("custom"):
-        env[sc["db_env"]] = with_schema(database_url(cfg), sc["schema"])
+        env.update(sc.get("env") or {})                       # the project's extra environment variables (settings, tokens)
+        url = with_schema(database_url(cfg), sc["schema"]); scheme = sc.get("db_scheme") or "postgresql"
+        if scheme != "postgresql" and url.startswith("postgresql"): url = scheme + url[len("postgresql"):]   # e.g. postgresql+psycopg2://
+        env[sc["db_env"]] = url
         env["PYTHONPATH"] = str(INJECT_DIR) + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
         env["GH_RACE_PAUSE_MS"] = str(sc.get("pause_ms", 25))
     return env

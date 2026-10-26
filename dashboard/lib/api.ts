@@ -74,12 +74,17 @@ export async function repair(id: string, opts: { k: number; max_attempts: number
 
 const needLive = () => { throw new Error("“Try your own app” needs live mode: set NEXT_PUBLIC_USE_MOCK=false in dashboard/.env.local and restart the dashboard."); };
 
-export async function uploadProject(p: { name: string; filename: string; content_b64: string; setup_sql: string; db_env: string }): Promise<Project> {
+export async function uploadProject(p: { name: string; filename: string; content_b64: string; setup_sql: string; db_env: string; db_scheme: string; env: Record<string, string> }): Promise<Project> {
   if (USE_MOCK) return needLive();
   return call("POST", "/projects", p);
 }
 
-export async function createScenario(pid: string, p: { method: string; path: string; params: Record<string, unknown>; race_n: number; state?: { table: string; column: string } | null }): Promise<{ id: string; title: string }> {
+export interface NewScenario {
+  method: string; path: string; params: Record<string, unknown>; path_params: Record<string, unknown>; json: unknown;
+  headers: Record<string, string>; race_n: number; state: { table: string; column: string } | null; qty_key: string | null; pause_ms: number;
+}
+
+export async function createScenario(pid: string, p: NewScenario): Promise<{ id: string; title: string }> {
   if (USE_MOCK) return needLive();
   return call("POST", `/projects/${pid}/scenario`, p);
 }

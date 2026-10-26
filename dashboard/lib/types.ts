@@ -48,19 +48,28 @@ export interface Scenario {
   title?: string | null;     // set for uploaded apps
   custom?: boolean;          // true for uploaded apps ("Try your own app")
   race_n?: number | null;    // simultaneous requests per try
-  endpoint: { method: string; path: string; params: Record<string, number | string> };
+  qty_key?: string | null;   // uploaded apps: which request value is "how much each request takes"
+  endpoint: { method: string; path: string; params: Record<string, number | string>; path_params?: Record<string, unknown>; json?: unknown; header_names?: string[] };
   invariants: number;
 }
 
 export interface ProjectEndpoint {
   method: string;
-  path: string;
+  path: string;               // full path as served, prefixes included
   function: string;
   file: string;
-  params: { name: string; type: string }[];
-  sample_params: Record<string, number | string>;
+  lineno: number;
+  is_async: boolean;
   supported: boolean;
-  unsupported_reason: string;
+  unsupported_reasons: string[];
+  notes: string[];
+  auth: { kind: string; header: string; prefix: string } | null;
+  required_headers: Record<string, string>;
+  sample_params: Record<string, unknown>;       // query values
+  sample_path_params: Record<string, unknown>;
+  sample_json: unknown;                          // sample JSON body built from the schema, or null
+  qty_candidates: string[];
+  suggested_qty: string | null;
   hint: string;
 }
 
@@ -69,7 +78,10 @@ export interface Project {
   name: string;
   filename: string;
   tables: string[];
+  columns: Record<string, { name: string; type: string }[]>;
   db_env: string;
+  db_scheme: string;
+  env_names: string[];
   entry: { file: string; module: string; var: string };
   endpoints: ProjectEndpoint[];
   suggested_state: { table: string; column: string } | null;

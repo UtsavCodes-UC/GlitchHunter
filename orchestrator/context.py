@@ -1,7 +1,7 @@
 """What the LLM sees about a scenario: the endpoint code (vulnerable branch only) and the live table schema.
 The demo app files hold both MODE branches in one function; showing the fixed branch would hand over the repair, so it is stripped.
 Uploaded apps (sc["custom"]) have no MODE branches, so their code is shown as it is."""
-import ast
+import ast, json
 from controller import config, attacker, validate
 
 PROMPTS = config.ROOT / "orchestrator" / "prompts"
@@ -20,11 +20,22 @@ def template_for(sc):
     return PROMPTS / ("invariants_custom_template.txt" if sc.get("custom") else "invariants_v2_template.txt")
 
 def vuln_function(sc):
-    """(source text of the vulnerable endpoint function incl. decorator, its `def` line)"""
-    src = config.app_path(sc).read_text(encoding="utf-8"); a, b = validate.region(src, sc["endpoint"])
-    tree = _VulnOnly().visit(ast.parse(src[a:b])); ast.fix_missing_locations(tree)
+    """(source text of the vulnerable endpoint function incl. decorators, its `def` line). Uploaded apps: the exact original text."""
+    import textwrap
+    src = config.app_path(sc).read_text(encoding="utf-8"); a, b = validate.endpoint_region(src, sc)
+    text = textwrap.dedent(src[a:b]) if sc.get("custom") else src[a:b]
+    tree = ast.parse(text)
     fn = next(n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)))
-    return ast.unparse(tree), f"{'async ' if isinstance(fn, ast.AsyncFunctionDef) else ''}def {fn.name}({ast.unparse(fn.args)})"
+    sig = f"{'async ' if isinstance(fn, ast.AsyncFunctionDef) else ''}def {fn.name}({ast.unparse(fn.args)})"
+    if sc.get("custom"): return text.strip("\n"), sig
+    tree = _VulnOnly().visit(tree); ast.fix_missing_locations(tree)
+    return ast.unparse(tree), sig
+
+def related(sc):
+    """helper functions the endpoint calls and the model classes it uses (uploaded apps): where the real logic often lives"""
+    from . import appscan
+    code, _ = vuln_function(sc)
+    return appscan.related_code(sc["project_dir"], code, (sc.get("func") or {}).get("name", ""))
 
 def file_context(sc, limit=12000):
     """the whole endpoint file, so the LLM can see helper names and imports (uploaded apps only; truncated)"""
@@ -47,10 +58,13 @@ def app_text(cfg, sc):
     code, _ = vuln_function(sc)
     path = sc["endpoint"]["path"]
     if sc.get("custom"):
-        snaps = ", ".join(f"snap_{t}" for t in sc["tables"])
+        snaps = ", ".join(f"snap_{t}" for t in sc["tables"]); rel = related(sc)
+        ep = sc["endpoint"]; body = f" and JSON body {json.dumps(ep['json'])}" if ep.get("json") is not None else ""
         return (f"Schema (the app's own tables; they hold the FINAL state after the run):\n{schema_text(cfg, sc)}\n"
                 f"Before every run each table T is copied to snap_T ({snaps}), so snap_T holds the state BEFORE the run.\nCode:\n{code}\n"
+                + (f"Related code the endpoint uses (helpers and models):\n{rel}\n" if rel else "")
+                + f"Each request is {ep['method']} {path} with values {json.dumps({**(ep.get('path_params') or {}), **ep['params']})}{body}. "
                 f"In ops_log, the endpoint column holds the request path WITH a leading slash: '{path}'. "
-                f"The request's query parameters are in ops_log.params (jsonb), for example (params->>'amount')::int.")
+                f"ALL the request's values (path values, query values and the JSON body's top-level fields) are in ops_log.params (jsonb), for example (params->>'quantity')::int.")
     return (f"Schema:\n{schema_text(cfg, sc)}\nCode:\n{code}\n"
             f"In ops_log, the endpoint column holds the request path WITH a leading slash: '{path}'.")

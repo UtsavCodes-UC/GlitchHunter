@@ -15,9 +15,9 @@ export default function Timeline({ requests }: { requests: RequestRecord[] }) {
           <div className="tl-label">Person {String.fromCharCode(65 + r.req)}</div>
           <div className="tl-track">
             {overlap && <div className="tl-overlap" style={{ left: pct(oStart), width: `${((oEnd - oStart) / max) * 100}%` }} />}
-            <div className={`tl-bar ${r.status === 200 ? "s200" : r.status === 409 ? "s409" : "sother"}`}
+            <div className={`tl-bar ${r.status >= 200 && r.status < 300 ? "s200" : r.status >= 400 && r.status < 500 ? "s409" : "sother"}`}
                  style={{ left: pct(r.start_ms), width: `${Math.max(((r.end_ms - r.start_ms) / max) * 100, 6)}%` }}>
-              {r.status === 200 ? "approved" : r.status === 409 ? "refused" : `error ${r.status}`}
+              {r.status >= 200 && r.status < 300 ? "approved" : r.status >= 400 && r.status < 500 ? "refused" : `error ${r.status}`}
             </div>
           </div>
         </div>

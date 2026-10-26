@@ -6,9 +6,14 @@ from . import llm, context
 TEMPLATE = config.ROOT / "orchestrator" / "prompts" / "invariants_v2_template.txt"
 
 def parse(raw):
-    m = re.search(r"\{.*\}", raw, re.S)
-    try: return json.loads(m.group(0))["invariants"] if m else None
-    except (ValueError, KeyError, TypeError): return None
+    """the invariants list from an LLM reply. Tolerates prose or code fences around the JSON and braces inside the prose:
+    tries to decode a JSON object starting at every '{' until one has an 'invariants' list."""
+    dec = json.JSONDecoder()
+    for m in re.finditer(r"\{", raw):
+        try: obj, _ = dec.raw_decode(raw[m.start():])
+        except ValueError: continue
+        if isinstance(obj, dict) and isinstance(obj.get("invariants"), list): return obj["invariants"]
+    return None
 
 def validate_sql(ro, sql):
     """(ok, error): a single SELECT/WITH only, then executed read-only against the real schema"""

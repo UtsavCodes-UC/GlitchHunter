@@ -65,11 +65,12 @@ export function strategyLabel(s?: string): string {
   return s ? s : "A fix proposed by the AI";
 }
 
-export function summarise(t: TrialResult, copy: ScenarioCopy) {
+// qtyKey: which request value is "how much each request takes" (uploaded apps choose it); undefined = the first value (demo apps); "" = none
+export function summarise(t: TrialResult, copy: ScenarioCopy, qtyKey?: string) {
   const key = Object.keys(t.initial_state).find((k) => t.initial_state[k] !== null) ?? "value";
   const initial = Number(t.initial_state[key] ?? 0), final = Number(t.final_state[key] ?? 0);
-  const approved = t.requests.filter((r) => r.status === 200);
-  const taken = approved.reduce((a, r) => a + firstParam(r), 0);
+  const approved = t.requests.filter((r) => r.status >= 200 && r.status < 300);
+  const taken = qtyKey === "" ? NaN : approved.reduce((a, r) => a + (qtyKey ? Number(r.params[qtyKey] ?? 0) : firstParam(r)), 0);  // "" = uploaded app with no quantity field
   const failed = Object.values(t.violations).some((rows) => !!rows && rows.length > 0);
   return { key, initial, final, taken, bothApproved: approved.length > 1 && taken > initial, failed, copy };
 }

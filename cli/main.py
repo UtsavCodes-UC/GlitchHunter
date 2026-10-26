@@ -52,7 +52,7 @@ def story(trial):
     out = [f"    Before: {key} = {initial}"]
     taken, approved = 0, 0
     for r in trial["requests"]:
-        ok = r["status"] == 200
+        ok = 200 <= r["status"] < 300
         if ok:
             approved += 1; taken += int(next(iter(r["params"].values()), 0)) if r["params"] else 0
         params = json.dumps(r["params"]) if r["params"] else ""
@@ -224,25 +224,44 @@ def cmd_upload(a):
     cfg = config.load(); app_f, sql_f = pathlib.Path(a.app), pathlib.Path(a.sql)
     for f in (app_f, sql_f):
         if not f.exists(): raise CliError(f"file not found: {f}")
-    try: meta = projects.create(cfg, a.name, app_f.name, app_f.read_bytes(), sql_f.read_text(encoding="utf-8"), a.env)
+    env = {}
+    for kv in a.env_var or []:
+        k, sep, v = kv.partition("=")
+        if not sep: raise CliError(f"--env-var must look like NAME=value, got '{kv}'")
+        env[k.strip()] = v
+    try: meta = projects.create(cfg, a.name, app_f.name, app_f.read_bytes(), sql_f.read_text(encoding="utf-8"), a.env, env, a.db_scheme)
     except ValueError as e: raise CliError(str(e))
-    print(bold(f"Found your app in {meta['entry']['file']}") + f" with table(s) {', '.join(meta['tables'])}")
+    print(bold(f"Found your app ({meta['entry']['module']}:{meta['entry']['var']}) with table(s) {', '.join(meta['tables'])}"))
     for w in meta["warnings"]: print(yellow("  ! " + w))
-    for e in meta["endpoints"]: print(f"  {'*' if e['supported'] else '-'} {e['method']} {e['path']}  {dim(e['hint'])}")
+    for e in meta["endpoints"]:
+        flag = "*" if e["supported"] else "-"
+        extra = ("  [needs " + e["auth"]["header"] + " header]" if e["auth"] else "") + ("  [JSON body]" if e["sample_json"] is not None else "")
+        print(f"  {flag} {e['method']:6s} {e['path']}  {dim(e['hint'] + extra)}")
+        for why in e["unsupported_reasons"]: print(red(f"      not supported: {why}"))
     ep = None
     if a.endpoint:
         m, _, p = a.endpoint.partition(" "); ep = next((e for e in meta["endpoints"] if e["method"] == m.upper() and e["path"] == p.strip()), None)
         if not ep: raise CliError(f"endpoint '{a.endpoint}' was not found; pick one of the listed ones.")
     else: ep = next((e for e in meta["endpoints"] if e["supported"]), None)
     if not ep: raise CliError("no supported endpoint found.")
-    try: params = json.loads(a.params) if a.params else ep["sample_params"]
-    except ValueError: raise CliError("--params must be valid JSON, for example '{\"qty\": 1}'")
+    def js(txt, what):
+        try: return json.loads(txt) if txt else None
+        except ValueError: raise CliError(f"{what} must be valid JSON")
+    headers = {}
+    for h in a.header or []:
+        k, sep, v = h.partition(":")
+        if not sep: raise CliError(f"--header must look like 'Name: value', got '{h}'")
+        headers[k.strip()] = v.strip()
     state = None
     if a.state:
         t, _, c = a.state.partition("."); state = {"table": t, "column": c}
-    try: sc = projects.create_scenario(meta["id"], ep["method"], ep["path"], params, a.n, state)
-    except ValueError as e: raise CliError(str(e))
-    print(green(f"Created scenario {sc['id']}") + f" (attacking {ep['method']} {ep['path']} {json.dumps(params)}, {a.n} at once, watching {sc['state']['table']}.{sc['state']['column']})")
+    try: sc = projects.create_scenario(meta["id"], ep["method"], ep["path"], js(a.params, "--params"), a.n, state, js(a.path_params, "--path-params"), js(a.body, "--body"),
+                                       headers, a.qty_key or ep["suggested_qty"], a.pause_ms)
+    except ValueError as e:
+        projects.delete(cfg, meta["id"]); raise CliError(str(e) + "\n(the upload was removed; run the command again with the missing option)")
+    e2 = sc["endpoint"]
+    print(green(f"Created scenario {sc['id']}") + f" (attacking {e2['method']} {e2['path']}, {a.n} at once, watching {sc['state']['table']}.{sc['state']['column']}"
+          + (f", quantity field '{sc['qty_key']}'" if sc.get("qty_key") else "") + ")")
     print(dim(f"  Next: .\\glitchhunter checks {sc['id']} --propose --filter --auto-approve   then   .\\glitchhunter scan {sc['id']}   then   .\\glitchhunter repair {sc['id']}"))
     return 0
 
@@ -251,6 +270,18 @@ def cmd_delete(a):
     try: projects.delete(cfg, a.project)
     except KeyError: raise CliError(f"no such project: {a.project}")
     print(green(f"Deleted project {a.project} (its app, files and private database schema)")); return 0
+
+def cmd_serve(a):
+    from . import serve
+    return serve.serve(a, sys.modules[__name__])
+
+def cmd_ui(a):
+    from . import serve
+    return serve.run_ui(a, sys.modules[__name__])
+
+def cmd_stop(a):
+    from . import serve
+    return serve.stop(a, sys.modules[__name__])
 
 def cmd_demo(a):
     from orchestrator import gate_a
@@ -261,11 +292,16 @@ def cmd_demo(a):
 def build():
     p = argparse.ArgumentParser(prog="glitchhunter", description="Find, reproduce and fix race conditions in database-backed APIs. Start with: doctor, then demo wallet.",
                                 formatter_class=argparse.RawDescriptionHelpFormatter,
-                                epilog="Typical flow:\n  .\\glitchhunter doctor\n  .\\glitchhunter checks wallet --propose --filter --auto-approve\n  .\\glitchhunter scan wallet\n  .\\glitchhunter repair wallet\n  .\\glitchhunter test wallet\n\nExit codes: 0 fine, 1 bug found / fix not accepted, 2 setup problem.")
+                                epilog="Demo in two terminals:\n  terminal 1:  .\\glitchhunter serve      (whole backend)\n  terminal 2:  .\\glitchhunter ui         (dashboard, then open http://localhost:3000)\n\nOr use the command line only:\n  .\\glitchhunter doctor\n  .\\glitchhunter checks wallet --propose --filter --auto-approve\n  .\\glitchhunter scan wallet\n  .\\glitchhunter repair wallet\n  .\\glitchhunter test wallet\n\nExit codes: 0 fine, 1 bug found / fix not accepted, 2 setup problem.")
     p.add_argument("--debug", action="store_true", help="show Python tracebacks")
     sub = p.add_subparsers(dest="cmd", required=True, metavar="command")
     def add(name, fn, help_):
         s = sub.add_parser(name, help=help_, description=help_); s.set_defaults(func=fn); return s
+    s = add("serve", cmd_serve, "START THE WHOLE BACKEND in this window (demo apps + API); Ctrl+C stops it")
+    s.add_argument("--restart", action="store_true", help="first stop leftover servers on our ports"); s.add_argument("--no-fixed", action="store_true", help="do not start the fixed wallet copy (port 8010)"); s.add_argument("--no-inventory", action="store_true")
+    s = add("ui", cmd_ui, "START THE DASHBOARD at http://localhost:3000 (builds it first if needed)")
+    s.add_argument("--dev", action="store_true", help="development mode (hot reload) instead of the steadier production build"); s.add_argument("--restart", action="store_true", help="replace whatever is on port 3000"); s.add_argument("--rebuild", action="store_true")
+    s = add("stop", cmd_stop, "stop leftover backend servers (and uploaded-app test copies)"); s.add_argument("--all", action="store_true", help="also stop the dashboard on port 3000")
     add("doctor", cmd_doctor, "check the database, AI keys and running apps")
     add("scenarios", cmd_scenarios, "list the demo and uploaded scenarios")
     s = add("scan", cmd_scan, "attack the app with simultaneous requests (exit 1 if a bug is found)")
@@ -282,7 +318,11 @@ def build():
     s = add("upload", cmd_upload, "add your own FastAPI + PostgreSQL app as a scenario")
     s.add_argument("--name", required=True); s.add_argument("--app", required=True, help=".py file or .zip"); s.add_argument("--sql", required=True, help="setup SQL that creates the tables")
     s.add_argument("--env", default="DATABASE_URL", help="env var your app reads for the database URL"); s.add_argument("--endpoint", help='for example "POST /book"; default: the best candidate')
-    s.add_argument("--params", help='request values as JSON, for example \'{"qty": 1}\''); s.add_argument("-n", type=int, default=6, help="simultaneous requests"); s.add_argument("--state", help="table.column to watch, for example seats.seats_left")
+    s.add_argument("--params", help='query values as JSON, for example \'{"qty": 1}\' (default: a sample built from the endpoint)'); s.add_argument("--body", help="JSON request body (default: a sample built from the endpoint's schema)")
+    s.add_argument("--path-params", help='values for {placeholders} in the path, as JSON, for example \'{"product_id": 1}\''); s.add_argument("--header", action="append", metavar="'Name: value'", help="a request header such as a token; repeatable")
+    s.add_argument("--env-var", action="append", metavar="NAME=value", help="extra environment variable for the app (settings, secrets); repeatable"); s.add_argument("--db-scheme", default="postgresql", help="database URL style, for example postgresql+psycopg2")
+    s.add_argument("--qty-key", help="which request value is 'how much each request takes' (default: guessed)"); s.add_argument("--pause-ms", type=int, help="how long each SELECT sleeps in the test copy to widen the race (default 25)")
+    s.add_argument("-n", type=int, default=6, help="simultaneous requests"); s.add_argument("--state", help="table.column to watch, for example seats.seats_left (default: guessed)")
     s = add("delete-project", cmd_delete, "remove an uploaded app, its files and its database schema"); s.add_argument("project", help="project id (the part after custom_)")
     s = add("demo", cmd_demo, "the whole loop in one go: propose, filter, approve, attack, repair, control")
     s.add_argument("scenario"); s.add_argument("--samples", type=int, default=3); s.add_argument("--k", type=int, default=50); s.add_argument("--no-decoys", action="store_true")

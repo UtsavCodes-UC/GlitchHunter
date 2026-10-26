@@ -48,16 +48,26 @@ def read_state(admin, sc, snapshot=False):
     if v is not None: v = int(v) if float(v) == int(v) else float(v)
     return {st["column"]: v}
 
+def request_values(ep):
+    """every value of a request in one flat dict: path values, query values and the JSON body's top-level fields (what ops_log.params holds)"""
+    body = ep.get("json")
+    return {**(ep.get("path_params") or {}), **ep["params"], **(body if isinstance(body, dict) else {})}
+
+def concrete_path(ep):
+    path = ep["path"]
+    for k, v in (ep.get("path_params") or {}).items(): path = path.replace("{" + k + "}", str(v))
+    return path
+
 def fire(cl, sc, n, delay, sequential=False):
     """n requests: released together by a barrier (default) or one after another. One record per request."""
-    ep = sc["endpoint"]; out = [None] * n
+    ep = sc["endpoint"]; out = [None] * n; url = concrete_path(ep); hdrs = {**(ep.get("headers") or {}), "X-Race-Delay": str(delay)}
     bar = None if sequential else threading.Barrier(n)
     def send(i):
         if bar: bar.wait()
         t = time.perf_counter()
-        try: st = cl.request(ep["method"], ep["path"], params=ep["params"], headers={"X-Race-Delay": str(delay)}).status_code
+        try: st = cl.request(ep["method"], url, params=ep["params"] or None, json=ep.get("json"), headers=hdrs).status_code
         except Exception: st = -1
-        out[i] = {"req": i, "method": ep["method"], "path": ep["path"], "params": dict(ep["params"]), "status": st,
+        out[i] = {"req": i, "method": ep["method"], "path": ep["path"], "params": request_values(ep), "status": st,
                   "start_ms": t * 1000, "end_ms": time.perf_counter() * 1000}
     if sequential:
         for i in range(n): send(i)

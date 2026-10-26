@@ -12,13 +12,14 @@ Loop: propose checks → filter → attack → explain → repair.
 - **API** (`orchestrator/`): what the dashboard calls. Contract in `docs/contracts.md`.
 
 ## Quick start (Windows, PowerShell, PostgreSQL 16 running)
+Two terminals, from the repo root:
 ```powershell
-$env:GH_DATABASE_URL="postgresql://rh:rh@localhost:5432/rh"   # database rh, user rh
 pip install -r requirements.txt
-cd apps; $env:MODE="vuln"; python -m uvicorn wallet_app:app --port 8000     # terminal 1: the buggy demo app
-cd ..; .\glitchhunter doctor                                                 # terminal 2: check the setup
-.\glitchhunter demo wallet                                                   # the whole loop in one command
+.\glitchhunter serve        # terminal 1: the whole backend (demo apps + API); Ctrl+C stops it
+.\glitchhunter ui           # terminal 2: the dashboard at http://localhost:3000 (builds it the first time)
 ```
+`GH_DATABASE_URL` defaults to `postgresql://rh:rh@localhost:5432/rh` (database `rh`, user `rh`). Set `GEMINI_API_KEY` in terminal 1 for the AI steps (otherwise the local Ollama model is used). If ports are stuck after a closed window: `.\glitchhunter stop --all`, or add `--restart` to either command.
+Command line only (no dashboard): `.\glitchhunter doctor`, then `.\glitchhunter demo wallet` with `serve` running.
 The AI steps use `GEMINI_API_KEY` (environment variable, never a file). If Gemini is unavailable they fall back to a local Ollama model.
 
 ## Layout

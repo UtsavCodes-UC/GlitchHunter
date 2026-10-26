@@ -36,8 +36,10 @@ def health(): return {"ok": True}
 @app.get("/scenarios")
 def scenarios():
     cfg = config.load()
-    return [{"id": k, "title": v.get("title"), "custom": bool(v.get("custom")), "endpoint": v["endpoint"], "race_n": v.get("race_n"),
-             "invariants": len(store.load_invariants(k))} for k, v in cfg["scenarios"].items()]
+    def public_ep(ep):  # header values can be secrets (tokens): only their names leave the server
+        return {**{k: val for k, val in ep.items() if k != "headers"}, "header_names": sorted((ep.get("headers") or {}))}
+    return [{"id": k, "title": v.get("title"), "custom": bool(v.get("custom")), "endpoint": public_ep(v["endpoint"]), "race_n": v.get("race_n"),
+             "qty_key": v.get("qty_key"), "invariants": len(store.load_invariants(k))} for k, v in cfg["scenarios"].items()]
 
 # ---- Try your own app: upload a FastAPI app + setup SQL, pick an endpoint, get a scenario ----
 @app.post("/projects")
@@ -48,7 +50,8 @@ def create_project(body: dict = Body(...)):
     if not str(body.get("name", "")).strip() or not body.get("filename") or not str(body.get("setup_sql", "")).strip():
         raise HTTPException(422, "a name, an app file and the setup SQL are all required")
     with _One():
-        try: return projects.create(cfg, str(body["name"]).strip()[:60], str(body["filename"]), content, str(body["setup_sql"]), body.get("db_env") or "DATABASE_URL")
+        try: return projects.create(cfg, str(body["name"]).strip()[:60], str(body["filename"]), content, str(body["setup_sql"]),
+                                    body.get("db_env") or "DATABASE_URL", body.get("env") or {}, body.get("db_scheme") or "postgresql")
         except ValueError as e: raise HTTPException(422, str(e))
 
 @app.get("/projects")
@@ -57,10 +60,11 @@ def list_projects(): return projects.list_all()
 @app.post("/projects/{pid}/scenario")
 def make_scenario(pid, body: dict = Body(...)):
     try:
-        sc = projects.create_scenario(pid, str(body.get("method", "")), str(body.get("path", "")), body.get("params") or {}, body.get("race_n") or 6, body.get("state"))
+        sc = projects.create_scenario(pid, str(body.get("method", "")), str(body.get("path", "")), body.get("params"), body.get("race_n") or 6, body.get("state"),
+                                      body.get("path_params"), body.get("json"), body.get("headers"), body.get("qty_key") or None, body.get("pause_ms"))
     except KeyError: raise HTTPException(404, "no such project")
     except ValueError as e: raise HTTPException(422, str(e))
-    return {"id": sc["id"], "title": sc["title"], "endpoint": sc["endpoint"]}
+    return {"id": sc["id"], "title": sc["title"]}
 
 @app.delete("/projects/{pid}")
 def delete_project(pid):

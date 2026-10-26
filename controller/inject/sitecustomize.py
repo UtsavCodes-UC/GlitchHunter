@@ -1,12 +1,23 @@
 """Loaded automatically by Python (via PYTHONPATH) ONLY in the test copy of an uploaded app started by GlitchHunter.
-If GH_RACE_PAUSE_MS is set, every SELECT made through psycopg2 sleeps that long afterwards. This widens the gap between
-"read" and "write" so a race condition shows up reliably, the same idea as the demo apps' X-Race-Delay hook, but without
-editing the user's code. It does not change what any query returns. Covers psycopg2 only (not SQLAlchemy-async, psycopg3, asyncpg)."""
+If GH_RACE_PAUSE_MS is set, every SELECT sleeps that long afterwards. This widens the gap between "read" and "write" so a race
+condition shows up reliably (the same idea as the demo apps' X-Race-Delay hook) without editing the user's code. It does not change
+what any query returns.
+Covers: psycopg2 (cursor level) and synchronous SQLAlchemy engines (after_cursor_execute). Does NOT cover async drivers
+(asyncpg, SQLAlchemy async, psycopg3 async): sleeping there would block the event loop and hide the race instead of widening it."""
 import os
 import time
 
 _ms = int(os.environ.get("GH_RACE_PAUSE_MS", "0") or 0)
+
+
+def _is_select(query):
+    if isinstance(query, bytes):
+        query = query.decode(errors="ignore")
+    return isinstance(query, str) and query.lstrip().lower().startswith("select")
+
+
 if _ms > 0:
+    _PausingCursor = None
     try:
         import psycopg2
         import psycopg2.extensions as _ext
@@ -14,10 +25,8 @@ if _ms > 0:
         class _PausingCursor(_ext.cursor):
             def execute(self, query, vars=None):
                 result = super().execute(query, vars)
-                if isinstance(query, (str, bytes)):
-                    q = query.decode() if isinstance(query, bytes) else query
-                    if q.lstrip().lower().startswith("select"):
-                        time.sleep(_ms / 1000)
+                if _is_select(query):
+                    time.sleep(_ms / 1000)
                 return result
 
         _orig_connect = psycopg2.connect
@@ -27,5 +36,19 @@ if _ms > 0:
             return _orig_connect(*args, **kwargs)
 
         psycopg2.connect = _connect
+    except ImportError:
+        pass
+
+    try:
+        from sqlalchemy import event
+        from sqlalchemy.engine import Engine
+
+        @event.listens_for(Engine, "after_cursor_execute")
+        def _pause_after_select(conn, cursor, statement, parameters, context, executemany):
+            # when the DBAPI cursor is already our pausing psycopg2 cursor, the pause has happened: do not sleep twice
+            if _PausingCursor is not None and isinstance(cursor, _PausingCursor):
+                return
+            if _is_select(statement):
+                time.sleep(_ms / 1000)
     except ImportError:
         pass
