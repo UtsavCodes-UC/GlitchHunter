@@ -1,0 +1,14 @@
+Schema:
+CREATE TABLE inventory(sku int PRIMARY KEY, stock int NOT NULL);
+Code:
+@app.post("/checkout")
+def checkout(qty: int):
+    with Conn() as c:
+        cur = c.cursor()
+        cur.execute("select stock from inventory where sku=1")
+        s = cur.fetchone()[0]
+        if s < qty:
+            raise HTTPException(409, "out of stock")
+        cur.execute("update inventory set stock=%s where sku=1", (s - qty,))
+        c.commit()
+    return {"ok": True}

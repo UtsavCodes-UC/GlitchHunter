@@ -1,0 +1,14 @@
+Schema:
+CREATE TABLE wallet(id int PRIMARY KEY, balance int NOT NULL);
+Code:
+@app.post("/withdraw")
+def withdraw(amount: int):
+    with Conn() as c:
+        cur = c.cursor()
+        cur.execute("select balance from wallet where id=1")
+        bal = cur.fetchone()[0]
+        if bal < amount:
+            raise HTTPException(409, "insufficient")
+        cur.execute("update wallet set balance=%s where id=1", (bal - amount,))
+        c.commit()
+    return {"ok": True}

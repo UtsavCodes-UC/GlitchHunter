@@ -1,0 +1,13 @@
+Schema:
+CREATE TABLE coupon_redemptions(user_id int, code text);
+Code:
+@app.post("/redeem")
+def redeem(user_id: int, code: str):
+    with Conn() as c:
+        cur = c.cursor()
+        cur.execute("select count(*) from coupon_redemptions where user_id=%s and code=%s", (user_id, code))
+        if cur.fetchone()[0] > 0:
+            raise HTTPException(409, "already redeemed")
+        cur.execute("insert into coupon_redemptions values (%s,%s)", (user_id, code))
+        c.commit()
+    return {"ok": True}

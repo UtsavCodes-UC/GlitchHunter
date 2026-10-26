@@ -1,0 +1,10 @@
+# Example target config. Copy to gh.yml for real use. No secrets here: the database URL comes from an environment variable.
+base_url: http://127.0.0.1:8000
+database_url_env: GH_DATABASE_URL   # e.g. postgresql://rh:rh@localhost:5432/rh (set in your environment)
+start_command: python -m uvicorn wallet_app:app --port 8000
+reset: POST /reset
+endpoints:
+  - method: POST
+    path: /withdraw
+    params: { amount: 80 }
+# auth_headers: { Authorization: "Bearer <token from environment>" }

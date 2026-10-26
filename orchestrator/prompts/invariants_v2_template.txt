@@ -1,0 +1,20 @@
+You are a database correctness engineer. Below is a FastAPI endpoint and its PostgreSQL schema. Many requests may hit it at the same time. Propose business invariants that must ALWAYS hold once any set of concurrent requests has finished, so that a violated invariant reveals a concurrency bug (race condition, lost update, double spend).
+
+TABLES AVAILABLE when an invariant is checked. Use ONLY these tables with exactly these columns; no other table exists (there is no "final_state" table):
+- the app's own table(s), shown in the schema below, holding the FINAL state after the run
+- ops_log(op_id int, endpoint text, amount int, qty int, user_id int, code text, status int): one row per request sent during the run. status is the HTTP status (200 = success, 409 = rejected). Columns not used by a request are NULL.
+- initial_state(balance int, stock int): exactly one row, the state BEFORE the run; columns that do not apply to this app are NULL.
+
+OUTPUT CONTRACT for each invariant: a single PostgreSQL SELECT statement that returns ZERO ROWS when the invariant holds and AT LEAST ONE ROW when it is violated. Put the violation test in WHERE or HAVING. Never write a query that always returns a row (for example SELECT COUNT(*) ... or SELECT a - b ...). Do not use placeholders such as %s. Do not assume how many requests were sent or what their amounts are.
+
+GUIDANCE: good invariants relate three things: the initial state, the successful operations in ops_log (status = 200), and the final state (conservation: nothing is created or lost), or they state that something must stay unique. A check on the final state alone can miss lost updates.
+
+WORKED EXAMPLE (a different app, for format only). App: ticket shop with table tickets(event_id int, seats_left int) and endpoint POST /book(qty).
+Conservation: SELECT 1 FROM initial_state i, tickets t WHERE i.stock <> t.seats_left + COALESCE((SELECT SUM(qty) FROM ops_log WHERE endpoint = '/book' AND status = 200), 0)
+Uniqueness (table holds(user_id int, event_id int); at most one hold per user and event): SELECT user_id, event_id FROM holds GROUP BY user_id, event_id HAVING COUNT(*) > 1
+
+Return 2 to 4 invariants for the app below as ONLY this JSON and nothing else:
+{"invariants":[{"name":"...","english":"...","sql":"SELECT ..."}]}
+
+APP:
+{APP}
