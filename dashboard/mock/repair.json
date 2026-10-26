@@ -1,0 +1,37 @@
+{
+  "attempts": [
+    {
+      "attempt": 1,
+      "strategy": "select_for_update",
+      "explanation": "Lock the wallet row while checking and applying the withdrawal.",
+      "patch": {
+        "file": "apps/wallet_app.py",
+        "function": "withdraw",
+        "code": "SELECT balance FROM wallet WHERE id = 1 FOR UPDATE"
+      },
+      "validation": {
+        "regression_failures": [],
+        "replay": {
+          "trials": 1,
+          "violations": 0
+        },
+        "fresh_trials": [
+          {
+            "delay_ms": 0,
+            "trials": 50,
+            "violations": 0
+          },
+          {
+            "delay_ms": 30,
+            "trials": 50,
+            "violations": 0
+          }
+        ],
+        "throughput_rps": 0.0
+      },
+      "accepted": true,
+      "reason": ""
+    }
+  ],
+  "accepted": true
+}

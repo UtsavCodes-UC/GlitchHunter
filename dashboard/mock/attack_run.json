@@ -1,0 +1,51 @@
+{
+  "run_id": "r_001",
+  "scenario": "wallet",
+  "n": 2,
+  "delay_ms": 0,
+  "trial": 0,
+  "summary": {
+    "total_trials": 1,
+    "trials_with_violation": 1,
+    "rule_name": "wallet.conservation"
+  },
+  "initial_state": {
+    "balance": 100
+  },
+  "requests": [
+    {
+      "req": 0,
+      "method": "POST",
+      "path": "/withdraw",
+      "params": {
+        "amount": 80
+      },
+      "status": 200,
+      "start_ms": 1.2,
+      "end_ms": 36.0
+    },
+    {
+      "req": 1,
+      "method": "POST",
+      "path": "/withdraw",
+      "params": {
+        "amount": 80
+      },
+      "status": 200,
+      "start_ms": 1.4,
+      "end_ms": 36.4
+    }
+  ],
+  "final_state": {
+    "balance": 20
+  },
+  "violations": {
+    "wallet.conservation": [
+      [
+        100,
+        20,
+        160
+      ]
+    ]
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "invariants": [
+    {
+      "id": "wallet.conservation",
+      "name": "balance_conservation",
+      "english": "Money out plus money left must equal money in.",
+      "sql": "SELECT 1 FROM initial_state i, wallet w WHERE i.balance <> w.balance + COALESCE((SELECT SUM(amount) FROM ops_log WHERE endpoint = '/withdraw' AND status = 200), 0)",
+      "source": "llm",
+      "status": "proposed",
+      "stats": {
+        "sequential_fires": 0,
+        "concurrent_fires": 48,
+        "recall_on_race": 1.0
+      }
+    }
+  ]
+}
