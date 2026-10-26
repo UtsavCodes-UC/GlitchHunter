@@ -9,10 +9,11 @@ import type { Scenario } from "@/lib/types";
 export default function Nav() {
   const path = usePathname();
   const [demos, setDemos] = useState<Scenario[]>([]);
+  const [uploads, setUploads] = useState(true);
   const [model, setModel] = useState<string | null | undefined>(undefined);   // undefined = loading, null = backend not reachable
   useEffect(() => {
     listScenarios().then((l) => setDemos(l.filter((s) => !s.custom))).catch(() => setDemos([]));
-    getHealth().then((h) => setModel(h.model ?? "API connected")).catch(() => setModel(null));
+    getHealth().then((h) => { setModel(h.model ?? "API connected"); setUploads(h.uploads !== false); }).catch(() => setModel(null));
   }, []);
   return (
     <header className="nav">
@@ -22,7 +23,7 @@ export default function Nav() {
           {demos.map((s) => (
             <Link key={s.id} href={`/scenarios/${s.id}`} aria-current={path === `/scenarios/${s.id}` ? "page" : undefined}>{copyFor(s.id, s).title}</Link>
           ))}
-          <Link href="/#upload">Your own code</Link>
+          {uploads && <Link href="/#upload">Your own code</Link>}
         </nav>
         {model !== undefined && <span className={`status ${model ? "" : "off"}`} title={model ? "AI model that answered last" : "The API is not reachable"}>{model ?? "API offline"}</span>}
       </div>

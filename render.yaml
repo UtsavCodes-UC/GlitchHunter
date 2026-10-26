@@ -1,0 +1,44 @@
+# Render Blueprint: PostgreSQL + backend (API and demo apps) + dashboard, all from Docker.
+# Render dashboard: New > Blueprint > pick this repo. Then fill in the secret marked "sync: false" (GEMINI_API_KEY).
+# If Render gives a service a different public URL than the one written below (the name was taken), update the two URL values and redeploy
+# the dashboard: NEXT_PUBLIC_API_URL is compiled in at build time.
+databases:
+  - name: glitchhunter-db
+    databaseName: glitchhunter
+    user: glitchhunter
+    plan: basic-256mb           # a paid plan: the free database expires after 30 days. Check the plan names in your Render dashboard.
+    ipAllowList: []             # only services inside Render can connect
+
+services:
+  - type: web
+    name: glitchhunter-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: starter
+    healthCheckPath: /health
+    envVars:
+      - key: GH_DATABASE_URL
+        fromDatabase:
+          name: glitchhunter-db
+          property: connectionString
+      - key: GEMINI_API_KEY
+        sync: false             # enter it in the Render dashboard, never in this file
+      - key: GH_CORS_ORIGINS
+        value: https://glitchhunter-web.onrender.com
+      - key: GH_DISABLE_UPLOADS   # keep "1" on a public site: uploaded code runs on the server and the API has no login
+        value: "1"
+      - key: LLM_OLLAMA_FALLBACK
+        value: "0"
+
+  - type: web
+    name: glitchhunter-web
+    runtime: docker
+    dockerfilePath: ./dashboard/Dockerfile
+    dockerContext: ./dashboard
+    plan: starter
+    envVars:
+      - key: NEXT_PUBLIC_API_URL
+        value: https://glitchhunter-api.onrender.com
+      - key: NEXT_PUBLIC_USE_MOCK
+        value: "false"

@@ -9,6 +9,11 @@ from . import repair as rep, store, uploads, runner, service, llm
 app = FastAPI(title="GlitchHunter orchestrator")
 _origins = ["http://localhost:3000", "http://127.0.0.1:3000"] + [o for o in os.environ.get("GH_CORS_ORIGINS", "").split(",") if o]
 app.add_middleware(CORSMiddleware, allow_origins=_origins, allow_methods=["*"], allow_headers=["*"])
+UPLOADS_ON = os.environ.get("GH_DISABLE_UPLOADS", "") not in ("1", "true", "yes")   # public deployments switch uploads off: uploaded code runs on the server
+
+def _need_uploads():
+    if not UPLOADS_ON: raise HTTPException(403, "Uploading your own code is switched off on this deployment (GH_DISABLE_UPLOADS=1).")
+
 _busy = uploads.BUSY  # attacks share one database; run one operation at a time
 
 def _sc(name):
@@ -31,7 +36,7 @@ def _start(cfg, sc):
     except RuntimeError as e: raise HTTPException(409, str(e))
 
 @app.get("/health")
-def health(): return {"ok": True, "provider": llm.PROVIDER, "model": llm.LAST_MODEL}
+def health(): return {"ok": True, "provider": llm.PROVIDER, "model": llm.LAST_MODEL, "uploads": UPLOADS_ON}
 
 @app.get("/scenarios")
 def scenarios():
@@ -64,6 +69,7 @@ def _run_stats():
 # ---- Your own code: upload (static scan) -> setup -> "save and test" job -> a normal scenario ----
 @app.post("/api/uploads")
 async def upload(request: Request):
+    _need_uploads()
     """multipart: field `name` (optional) and one or more `files` (a .zip, loose files, or a picked folder: the file name carries its relative path)"""
     lim = uploads.LIMITS(); form = await request.form()
     items = []
@@ -77,7 +83,7 @@ async def upload(request: Request):
         except ValueError as e: raise HTTPException(422, str(e))
 
 @app.get("/api/uploads")
-def list_uploads(): return uploads.list_all()
+def list_uploads(): return uploads.list_all() if UPLOADS_ON else []
 
 def _up(pid):
     try: return uploads.get(pid)
@@ -88,12 +94,14 @@ def get_upload(pid): return uploads.public(_up(pid), full=True)
 
 @app.get("/api/uploads/{pid}/source")
 def upload_source(pid, path: str, fn: str):
+    _need_uploads()
     _up(pid)
     try: return uploads.source(pid, path, fn)
     except KeyError: raise HTTPException(404, "that function was not found")
 
 @app.put("/api/uploads/{pid}/config")
 def put_config(pid, body: dict = Body(...)):
+    _need_uploads()
     _up(pid)
     with _One():
         try: return uploads.save_setup(pid, body)
@@ -101,17 +109,20 @@ def put_config(pid, body: dict = Body(...)):
 
 @app.post("/api/uploads/{pid}/check")
 def start_check(pid):
+    _need_uploads()
     _up(pid); cfg = config.load()
     try: return {"job": uploads.start_check(cfg, pid)}
     except ValueError as e: raise HTTPException(422, str(e))
 
 @app.get("/api/uploads/{pid}/jobs/{jid}")
 def get_job(pid, jid):
+    _need_uploads()
     try: return uploads.get_job(pid, jid)
     except KeyError: raise HTTPException(404, "no such job")
 
 @app.delete("/api/uploads/{pid}")
 def delete_upload(pid):
+    _need_uploads()
     cfg = config.load(); _up(pid)
     with _One():
         try: uploads.delete(cfg, pid)

@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { listScenarios, listUploads } from "@/lib/api";
+import { getHealth, listScenarios, listUploads } from "@/lib/api";
 import { copyFor } from "@/lib/copy";
 import type { Scenario, UploadSummary } from "@/lib/types";
 import { ErrorBox } from "@/components/ui";
@@ -11,7 +11,9 @@ export default function Home() {
   const [scenarios, setScenarios] = useState<Scenario[] | null>(null);
   const [projects, setProjects] = useState<UploadSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [uploadsOn, setUploadsOn] = useState(true);   // a public deployment can switch uploads off
   useEffect(() => {
+    getHealth().then((h) => setUploadsOn(h.uploads !== false)).catch(() => { /* keep the default */ });
     listScenarios().then(setScenarios).catch((e) => setError((e as Error).message));
     listUploads().then(setProjects).catch(() => setProjects([]));   // only used for the "continue" links: a failure just hides them
   }, []);
@@ -28,7 +30,7 @@ export default function Home() {
           </p>
           <div className="cta">
             <Link href="/#demos" className="btn lg">Try a demo</Link>
-            <Link href="/#upload" className="btn ghost lg">Use your own code</Link>
+            {uploadsOn && <Link href="/#upload" className="btn ghost lg">Use your own code</Link>}
           </div>
         </div>
         <p className="note">
@@ -65,6 +67,7 @@ export default function Home() {
         )}
       </section>
 
+      {uploadsOn && (
       <section className="block" id="upload">
         <span className="label">Use your own code</span>
         <UploadBox />
@@ -77,6 +80,7 @@ export default function Home() {
           </p>
         )}
       </section>
+      )}
 
       <footer className="foot">GlitchHunter reproduces and validates concurrency bugs. A passing fix is evidence, not proof.</footer>
     </>

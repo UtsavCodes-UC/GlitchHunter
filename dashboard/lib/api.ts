@@ -34,7 +34,7 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 // Mock mode keeps invariant decisions in memory so Approve / Reject still work without a backend.
 let mockInvariants: Invariant[] = mock<Invariant[]>(invariantsMock.invariants);
 
-export async function getHealth(): Promise<{ ok: boolean; provider?: string; model?: string }> {
+export async function getHealth(): Promise<{ ok: boolean; provider?: string; model?: string; uploads?: boolean }> {
   if (USE_MOCK) return { ok: true };
   return call("GET", "/health");
 }

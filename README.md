@@ -43,3 +43,6 @@ Uploaded projects get their own PostgreSQL role and schema and run as a separate
 
 ## Command line
 `python -m pip install -e .` installs a `glitchhunter` command. `glitchhunter fix <your app folder> [--apply]` runs the whole loop (read, set up, attack, AI fix, test, diff). See `docs/cli.md`.
+
+## Deploy
+`render.yaml` and two Dockerfiles deploy the dashboard, API, demo apps and a PostgreSQL database on Render. See `docs/deploy_render.md` (not yet built or run on Render).

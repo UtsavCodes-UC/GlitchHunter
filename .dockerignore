@@ -1,0 +1,14 @@
+.git
+.venv
+venv
+__pycache__
+*.pyc
+runs
+dashboard
+docs
+samples
+examples
+tests
+*.egg-info
+.env
+*.env
