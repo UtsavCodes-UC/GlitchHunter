@@ -21,7 +21,7 @@ Files: `render.yaml` (database + two web services), `Dockerfile` (backend: API +
 - `runs/` (saved attacks, checks) lives on the container's temporary disk and is lost on every deploy or restart; add a persistent disk mounted at `/app/runs` if that matters.
 
 ## Costs and plans
-`render.yaml` uses `starter` web services and a `basic-256mb` database. Check the plan names in your Render dashboard; they have changed over time. The free PostgreSQL expires after 30 days, and free web services sleep after idle time (attacks take a minute or more, so a sleeping service makes the first request slow). Credits are applied under the workspace's Billing page.
+`render.yaml` uses the **free** plans, so no card is needed. Limits: free web services sleep after about 15 minutes idle (the first request then takes about a minute, and an attack takes a minute or more), they have little memory, and the free PostgreSQL is deleted after 30 days. For longer use or more reliability, change `plan:` to `starter` for the web services and `basic-256mb` for the database (check the plan names in your Render dashboard); those need a card on file. Credits are applied under the workspace's Billing page.
 
 ## Quick local check of the images (needs Docker)
 ```
