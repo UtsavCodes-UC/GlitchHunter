@@ -6,7 +6,7 @@ databases:
   - name: glitchhunter-db
     databaseName: glitchhunter
     user: glitchhunter
-    plan: basic-256mb           # paid PostgreSQL, no 30-day expiry. Check the plan names in your Render dashboard if the sync rejects it.
+    plan: free                  # free PostgreSQL: deleted after 30 days. Use a paid plan (for example basic-256mb) for anything longer.
     ipAllowList: []             # only services inside Render can connect
 
 services:
@@ -15,7 +15,7 @@ services:
     runtime: docker
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    plan: standard              # 2 GB memory: the API, three demo apps and uploaded code share this container (use starter to save credit)
+    plan: free                  # free web services sleep after ~15 minutes idle and have 512 MB of memory (paid: starter 512 MB, standard 2 GB)
     healthCheckPath: /health
     envVars:
       - key: GH_DATABASE_URL
@@ -36,7 +36,7 @@ services:
     runtime: docker
     dockerfilePath: ./dashboard/Dockerfile
     dockerContext: ./dashboard
-    plan: starter
+    plan: free                  # free web services sleep after ~15 minutes idle (the first request then takes a minute)
     envVars:
       - key: NEXT_PUBLIC_API_URL
         value: https://glitchhunter-api-lz3x.onrender.com
