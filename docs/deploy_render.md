@@ -23,7 +23,7 @@ Files: `render.yaml` (database + two web services), `Dockerfile` (backend: API +
 - `runs/` (saved attacks, checks) lives on the container's temporary disk and is lost on every deploy or restart; add a persistent disk mounted at `/app/runs` if that matters.
 
 ## Costs and plans
-`render.yaml` uses the **free** plans, so no card is needed. Limits: free web services sleep after about 15 minutes idle (the first request then takes about a minute, and an attack takes a minute or more), they have little memory, and the free PostgreSQL is deleted after 30 days. For longer use or more reliability, change `plan:` to `starter` for the web services and `basic-256mb` for the database (check the plan names in your Render dashboard); those need a card on file. Credits are applied under the workspace's Billing page.
+`render.yaml` uses paid plans (a card is on file and the workspace has credit): the API on `standard` (2 GB memory), the dashboard on `starter`, the database on `basic-256mb`. Paid web services do not sleep, and the database does not expire. As a rough guide (check Render's pricing page) these are about $25, $7 and $6 a month, billed by the second against your credit first. **Suspend or delete the three resources when the event is over.** To spend less, change the API's `plan:` to `starter`; to use no card at all, use `free` for all three (they sleep, have 512 MB, and the free database expires after 30 days). Credits are shown under the workspace's Billing page.
 
 ## Quick local check of the images (needs Docker)
 ```
