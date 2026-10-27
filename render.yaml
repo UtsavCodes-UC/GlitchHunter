@@ -39,6 +39,6 @@ services:
     plan: free                  # free web services sleep after ~15 minutes idle (the first request then takes a minute) and have little memory
     envVars:
       - key: NEXT_PUBLIC_API_URL
-        value: https://glitchhunter-api.onrender.com
+        value: https://glitchhunter-api-lz3x.onrender.com
       - key: NEXT_PUBLIC_USE_MOCK
         value: "false"
