@@ -2,8 +2,8 @@
 If GH_RACE_PAUSE_MS is set, every SELECT sleeps that long afterwards. This widens the gap between "read" and "write" so a race
 condition shows up reliably (the same idea as the demo apps' X-Race-Delay hook) without editing the user's code. It does not change
 what any query returns.
-Covers: psycopg2 (cursor level) and synchronous SQLAlchemy engines (after_cursor_execute). Does NOT cover async drivers
-(asyncpg, SQLAlchemy async, psycopg3 async): sleeping there would block the event loop and hide the race instead of widening it."""
+Covers: psycopg2 (cursor level), synchronous SQLAlchemy engines (after_cursor_execute) and asyncpg (a non-blocking asyncio.sleep after
+fetch / fetchrow / fetchval). Does NOT cover SQLAlchemy async or psycopg3 async."""
 import os
 import time
 
@@ -72,5 +72,25 @@ if _ms > 0:
                 return
             if _is_select(statement):
                 time.sleep(_ms / 1000)
+    except ImportError:
+        pass
+
+    # asyncpg (async): a time.sleep here would freeze the whole event loop and HIDE the race, but `await asyncio.sleep` only suspends
+    # this request, so other requests run in the gap: exactly the read-check-write window we want to widen.
+    try:
+        import asyncio, functools
+        from asyncpg import Connection as _AsyncpgConnection
+
+        def _async_pause(orig):
+            @functools.wraps(orig)
+            async def wrapper(self, query, *args, **kwargs):
+                result = await orig(self, query, *args, **kwargs)
+                if _is_select(query):
+                    await asyncio.sleep(_ms / 1000)
+                return result
+            return wrapper
+
+        for _name in ("fetch", "fetchrow", "fetchval"):
+            setattr(_AsyncpgConnection, _name, _async_pause(getattr(_AsyncpgConnection, _name)))
     except ImportError:
         pass
