@@ -26,8 +26,8 @@ services:
         sync: false             # enter it in the Render dashboard, never in this file
       - key: GH_CORS_ORIGINS
         value: https://glitchhunter-web.onrender.com
-      - key: GH_DISABLE_UPLOADS   # keep "1" on a public site: uploaded code runs on the server and the API has no login
-        value: "1"
+      - key: GH_DISABLE_UPLOADS   # "0" = the "Your own code" feature is ON for everyone who has the URL (the API has no login). Set "1" to switch it off.
+        value: "0"
       - key: LLM_OLLAMA_FALLBACK
         value: "0"
 

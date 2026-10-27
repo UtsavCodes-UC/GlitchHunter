@@ -16,7 +16,9 @@ Files: `render.yaml` (database + two web services), `Dockerfile` (backend: API +
 ## What is configured
 - The backend container runs the wallet (8000), inventory (8001) and fixed wallet (8010) demo apps on localhost and the API on `$PORT`. If any of them stops, the container exits and Render restarts it.
 - `GH_DATABASE_URL` comes from the database's internal connection string (the database accepts only internal connections: `ipAllowList: []`).
-- **Uploading your own code is switched off** (`GH_DISABLE_UPLOADS=1`): the dashboard hides it and the API refuses it. Reason: uploaded code runs on the server, the API has no login, and Render's database user probably cannot create roles. Do not enable it on a public URL.
+- **Uploading your own code is ON for everyone** (`GH_DISABLE_UPLOADS=0`), exactly like localhost. The API has no login, so **anyone with the URL can run code on this server**. The container runs as root so that uploaded code can be started as the unprivileged user `nobody` with resource limits and no access to the API's environment; outbound network access is not restricted. This Linux sandbox has NOT been tested. To switch the feature off, set `GH_DISABLE_UPLOADS` to `1` in `render.yaml` (or in the service's environment) and redeploy.
+- **It needs `CREATEROLE`:** each uploaded project gets its own database role. If Render's database user cannot create roles, "Save and test the setup" fails with a message saying so; the demos still work. Roles cannot be granted on Render's managed database by you, so this may simply not work there.
+- Free plans have 512 MB of memory shared by the API, the three demo apps and any uploaded app: an upload may be killed or may restart the container.
 - No local Ollama on Render (`LLM_OLLAMA_FALLBACK=0`): when Gemini's quota runs out, AI steps fail instead of falling back.
 - `runs/` (saved attacks, checks) lives on the container's temporary disk and is lost on every deploy or restart; add a persistent disk mounted at `/app/runs` if that matters.
 
